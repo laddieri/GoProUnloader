@@ -22,6 +22,9 @@ import kotlin.coroutines.resume
 
 private const val TAG = "GoProBleManager"
 
+private fun BluetoothGatt.findCharacteristic(uuid: UUID): BluetoothGattCharacteristic? =
+    services?.flatMap { it.characteristics }?.find { it.uuid == uuid }
+
 data class WifiCredentials(val ssid: String, val password: String)
 
 @SuppressLint("MissingPermission")
@@ -137,7 +140,7 @@ class GoProBleManager(private val context: Context) {
                             return
                         }
                         onStatus("Services discovered. Reading WiFi credentials…")
-                        val ssidChar = gatt.getCharacteristic(WIFI_AP_SSID_UUID)
+                        val ssidChar = gatt.findCharacteristic(WIFI_AP_SSID_UUID)
                         if (ssidChar == null) {
                             Log.e(TAG, "SSID characteristic not found")
                             if (!cont.isCompleted) cont.resume(null)
@@ -157,7 +160,7 @@ class GoProBleManager(private val context: Context) {
                             WIFI_AP_SSID_UUID -> {
                                 ssid = characteristic.value?.toString(Charsets.UTF_8)
                                 Log.d(TAG, "SSID: $ssid")
-                                val passChar = gatt.getCharacteristic(WIFI_AP_PASSWORD_UUID)
+                                val passChar = gatt.findCharacteristic(WIFI_AP_PASSWORD_UUID)
                                     ?: run {
                                         if (!cont.isCompleted) cont.resume(null); return
                                     }
@@ -180,7 +183,7 @@ class GoProBleManager(private val context: Context) {
                     ) {
                         if (descriptor.uuid == NOTIFY_DESCRIPTOR_UUID && !wifiCmdSent) {
                             wifiCmdSent = true
-                            val cmdChar = gatt.getCharacteristic(CMD_REQ_UUID) ?: return
+                            val cmdChar = gatt.findCharacteristic(CMD_REQ_UUID) ?: return
                             @Suppress("DEPRECATION")
                             cmdChar.value = ENABLE_WIFI_CMD
                             cmdChar.writeType =
@@ -240,13 +243,13 @@ class GoProBleManager(private val context: Context) {
 
     @Suppress("DEPRECATION")
     private fun enableWifiNotificationsAndSend(gatt: BluetoothGatt) {
-        val cmdRsp = gatt.getCharacteristic(CMD_RSP_UUID) ?: run {
+        val cmdRsp = gatt.findCharacteristic(CMD_RSP_UUID) ?: run {
             Log.e(TAG, "CMD_RSP characteristic not found"); return
         }
         gatt.setCharacteristicNotification(cmdRsp, true)
         val descriptor = cmdRsp.getDescriptor(NOTIFY_DESCRIPTOR_UUID) ?: run {
             // No descriptor — just send the command directly
-            val cmdChar = gatt.getCharacteristic(CMD_REQ_UUID) ?: return
+            val cmdChar = gatt.findCharacteristic(CMD_REQ_UUID) ?: return
             cmdChar.value = ENABLE_WIFI_CMD
             cmdChar.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
             gatt.writeCharacteristic(cmdChar)
