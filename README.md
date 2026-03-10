@@ -1,6 +1,6 @@
 # GoPro Unloader
 
-A Python script that automates the full offload workflow for a **GoPro Hero 11 Mini**:
+A **Python script** and **Android app** that automate the full offload workflow for a **GoPro Hero 11 Mini**:
 
 1. **Wakes** the camera via Bluetooth LE
 2. **Downloads** all videos over WiFi using the [GoPro Open API](https://gopro.github.io/OpenGoPro/)
@@ -115,14 +115,64 @@ Calls FFmpeg with:
 
 ---
 
+## Android App
+
+The `app/` directory contains a native Android application that provides the same
+offload workflow as the Python script, optimised for phones and tablets.
+
+### Requirements
+
+| Requirement | Details |
+|---|---|
+| Android 8.0+ (API 26) | Minimum supported OS |
+| Bluetooth LE | Camera wake & WiFi credential reading |
+| WiFi | File downloads from the GoPro hotspot |
+| Storage | Files saved to `Android/data/com.gopro.unloader/files/Movies/GoProUnloader/` |
+
+### Build
+
+1. Open the `GoProUnloader` folder in **Android Studio Hedgehog** (or newer).
+2. Let Gradle sync finish.
+3. Connect a device (API 26+) or start an emulator with BLE support.
+4. Run **▶ Run 'app'**.
+
+### Usage
+
+1. Tap **Start Offload** — the app will:
+   - Scan for a nearby GoPro via Bluetooth LE and wake its WiFi AP.
+   - Display the WiFi SSID and password on-screen.
+   - Wait while you connect your phone to the GoPro's WiFi hotspot.
+   - Download all new MP4 files with a per-file progress bar.
+   - Delete downloaded files from the camera (unless **Don't delete** is checked).
+   - Transcode each video to 1080p H.264/AAC using FFmpeg Kit.
+2. Tap **List Files** to browse camera contents without downloading.
+3. Tap the **⋮ Options** menu to toggle:
+   - *Skip BLE* — if WiFi is already connected
+   - *Keep originals* — retain raw downloads alongside 1080p copies
+   - *Don't delete* — leave files on the camera
+   - *Skip transcoding* — save raw downloads only
+   - *Set BLE Address* — skip scanning if the camera's BLE address is known
+
+### Output Structure
+
+```
+Android/data/com.gopro.unloader/files/Movies/GoProUnloader/
+├── raw/          # Downloaded originals (removed after transcode unless --keep-originals)
+└── transcoded/   # 1080p H.264/AAC MP4 files
+```
+
+---
+
 ## Troubleshooting
 
 | Problem | Solution |
 |---|---|
 | Camera not found via BLE | Ensure Bluetooth is on and camera is within ~10 m |
-| WiFi not reachable | Connect your computer to the GoPro WiFi AP first |
-| `ffmpeg not found` | Install FFmpeg and ensure it is on your `PATH` |
-| Download fails mid-way | Re-run the script; already-deleted files are gone but untouched files can be retried |
+| WiFi not reachable | Connect your computer/phone to the GoPro WiFi AP first |
+| `ffmpeg not found` | Install FFmpeg and ensure it is on your `PATH` (Python) |
+| Download fails mid-way | Re-run the script/app; already-deleted files are gone but untouched files can be retried |
+| Android: BLE permission denied | Grant *Nearby devices* permission in Android settings |
+| Android: transcoding fails | Ensure the phone has sufficient free storage |
 
 ---
 

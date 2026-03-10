@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GoPro Unloader</string>
+    <string name="btn_start_offload">Start Offload</string>
+    <string name="btn_list_files">List Files</string>
+</resources>
