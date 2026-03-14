@@ -420,8 +420,8 @@ def parse_args() -> argparse.Namespace:
         description="GoPro Hero 11 Mini Offload Tool — BLE wake, Wi-Fi download, FFmpeg transcode"
     )
     parser.add_argument(
-        "--output-dir", "-o", type=Path, default=Path("./gopro_output"),
-        help="Root output directory (default: ./gopro_output)",
+        "--output-dir", "-o", type=Path, default=Path("F:/gopro"),
+        help="Root output directory (default: F:/gopro)",
     )
     parser.add_argument(
         "--skip-ble", "--no-ble", action="store_true",
