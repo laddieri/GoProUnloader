@@ -439,11 +439,7 @@ def parse_args() -> argparse.Namespace:
         "--list", "-l", action="store_true",
         help="List files on the GoPro without downloading",
     )
-    parser.add_argument(
-        "--keep-originals", action="store_true",
-        help="Keep raw downloaded files alongside 1080p transcodes",
-    )
-    parser.add_argument(
+parser.add_argument(
         "--no-delete", action="store_true",
         help="Skip deleting files from the camera after downloading",
     )
@@ -555,12 +551,13 @@ def main() -> None:
         mp4s = [(f, dest) for f, dest in downloaded_files if f["name"].lower().endswith(".mp4")]
         if mp4s:
             transcoded_dir.mkdir(parents=True, exist_ok=True)
+            keep = input("Keep original (raw) videos after transcoding? [y/N] ").strip().lower() == "y"
             log.info("Transcoding %d video(s) to 1080p…", len(mp4s))
             for f, src in mp4s:
                 if src.exists() and src.stat().st_size == f["size"]:
                     out = transcoded_dir / src.name
                     ok  = transcode_to_1080p(src, out)
-                    if ok and not args.keep_originals:
+                    if ok and not keep:
                         src.unlink()
                     elif not ok:
                         transcode_errors.append(src.name)
