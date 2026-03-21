@@ -154,8 +154,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Quick check: connects to the GoPro over WiFi (no BLE, no file transfer),
-     * reads battery % and SD card free space, and posts estimates to [cameraInfo].
+     * Quick check: connects to the GoPro over Bluetooth LE (no WiFi, no file transfer),
+     * reads battery % and SD card free space via the BLE Query API, and posts to [cameraInfo].
      */
     fun quickConnect() {
         if (_isBusy.value == true) return
@@ -164,17 +164,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             try {
-                _phase.value = Phase.WIFI_WAIT
-                log("Connecting to GoPro…")
-                val reachable = withContext(Dispatchers.IO) { goProApi.isCameraReachable() }
-                if (!reachable) {
-                    log("Cannot reach GoPro. Make sure your phone is connected to the GoPro WiFi network.")
-                    return@launch
-                }
-                log("Connected. Reading camera stats…")
-                val info = withContext(Dispatchers.IO) { goProApi.getCameraInfo() }
+                _phase.value = Phase.BLE_SCAN
+                log("Scanning for GoPro via Bluetooth…")
+                val bleManager = GoProBleManager(context).also { bleMgr = it }
+                val info = bleManager.queryCameraInfo(
+                    knownAddress = bleAddress,
+                    onStatus = { log(it) }
+                )
                 if (info == null) {
-                    log("Could not read camera info.")
+                    log("Could not read camera info over Bluetooth.")
                     return@launch
                 }
                 _cameraInfo.postValue(info)
@@ -182,7 +180,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _phase.value = Phase.IDLE
             } finally {
                 _isBusy.value = false
-                if (_phase.value == Phase.WIFI_WAIT) _phase.value = Phase.IDLE
+                if (_phase.value == Phase.BLE_SCAN) _phase.value = Phase.IDLE
             }
         }
     }

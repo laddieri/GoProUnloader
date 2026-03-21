@@ -12,6 +12,7 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.content.Context
 import android.util.Log
+import com.gopro.unloader.model.CameraInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -37,6 +38,11 @@ class GoProBleManager(private val context: Context) {
         val WIFI_AP_PASSWORD_UUID: UUID = UUID.fromString("b5f90003-aa8d-11e3-9046-0002a5d5c51b")
         val NOTIFY_DESCRIPTOR_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
         val ENABLE_WIFI_CMD = byteArrayOf(0x03, 0x17, 0x01, 0x01)
+
+        val QUERY_REQ_UUID: UUID = UUID.fromString("b5f90076-aa8d-11e3-9046-0002a5d5c51b")
+        val QUERY_RSP_UUID: UUID = UUID.fromString("b5f90077-aa8d-11e3-9046-0002a5d5c51b")
+        // 0x13 = Get Status Value; 0x02 = battery %, 0x36 (54) = SD remaining KB
+        val STATUS_QUERY_CMD = byteArrayOf(0x03, 0x13, 0x02, 0x36.toByte())
 
         const val SCAN_TIMEOUT_MS = 15_000L
         const val CONNECT_TIMEOUT_MS = 20_000L
@@ -257,6 +263,157 @@ class GoProBleManager(private val context: Context) {
         }
         descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
         gatt.writeDescriptor(descriptor)
+    }
+
+    /**
+     * Query battery % and SD card remaining space directly over BLE — no WiFi required.
+     * Uses the GoPro BLE Query API (GP-0076/GP-0077) with command 0x13 (Get Status Value).
+     */
+    suspend fun queryCameraInfo(
+        knownAddress: String? = null,
+        onStatus: (String) -> Unit = {}
+    ): CameraInfo? = withContext(Dispatchers.IO) {
+        val device = if (knownAddress != null) {
+            onStatus("Connecting to known address $knownAddress…")
+            bluetoothAdapter.getRemoteDevice(knownAddress)
+        } else {
+            onStatus("Scanning for GoPro via Bluetooth LE…")
+            scanForGoPro(onStatus)
+        }
+
+        if (device == null) {
+            onStatus("No GoPro found via BLE. Make sure the camera is within range.")
+            return@withContext null
+        }
+
+        onStatus("Found ${device.name ?: "GoPro"} (${device.address}). Querying camera status…")
+        connectAndQueryStatus(device, onStatus)
+    }
+
+    private suspend fun connectAndQueryStatus(
+        device: BluetoothDevice,
+        onStatus: (String) -> Unit
+    ): CameraInfo? = withContext(Dispatchers.IO) {
+        withTimeoutOrNull(CONNECT_TIMEOUT_MS) {
+            suspendCancellableCoroutine { cont ->
+                val gattCallback = object : BluetoothGattCallback() {
+                    override fun onConnectionStateChange(
+                        gatt: BluetoothGatt, status: Int, newState: Int
+                    ) {
+                        when (newState) {
+                            BluetoothProfile.STATE_CONNECTED -> {
+                                onStatus("Connected. Discovering services…")
+                                gatt.discoverServices()
+                            }
+                            BluetoothProfile.STATE_DISCONNECTED -> {
+                                if (!cont.isCompleted) cont.resume(null)
+                            }
+                        }
+                    }
+
+                    @Suppress("DEPRECATION")
+                    override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+                        if (status != BluetoothGatt.GATT_SUCCESS) {
+                            Log.e(TAG, "Service discovery failed: status=$status")
+                            if (!cont.isCompleted) cont.resume(null)
+                            return
+                        }
+                        val queryRsp = gatt.findCharacteristic(QUERY_RSP_UUID) ?: run {
+                            Log.e(TAG, "Query response characteristic not found")
+                            if (!cont.isCompleted) cont.resume(null)
+                            return
+                        }
+                        gatt.setCharacteristicNotification(queryRsp, true)
+                        val descriptor = queryRsp.getDescriptor(NOTIFY_DESCRIPTOR_UUID)
+                        if (descriptor != null) {
+                            descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                            gatt.writeDescriptor(descriptor)
+                        } else {
+                            sendStatusQueryCommand(gatt)
+                        }
+                    }
+
+                    @Suppress("DEPRECATION")
+                    override fun onDescriptorWrite(
+                        gatt: BluetoothGatt,
+                        descriptor: BluetoothGattDescriptor,
+                        status: Int
+                    ) {
+                        if (descriptor.uuid == NOTIFY_DESCRIPTOR_UUID) {
+                            sendStatusQueryCommand(gatt)
+                        }
+                    }
+
+                    @Suppress("DEPRECATION")
+                    override fun onCharacteristicChanged(
+                        gatt: BluetoothGatt,
+                        characteristic: BluetoothGattCharacteristic
+                    ) {
+                        if (characteristic.uuid == QUERY_RSP_UUID) {
+                            val data = characteristic.value ?: return
+                            Log.d(TAG, "Query response: ${data.joinToString { "0x%02x".format(it) }}")
+                            val info = parseStatusQueryResponse(data)
+                            gatt.disconnect()
+                            if (!cont.isCompleted) cont.resume(info)
+                        }
+                    }
+                }
+
+                val g = device.connectGatt(
+                    context, false, gattCallback, BluetoothDevice.TRANSPORT_LE
+                )
+                this@GoProBleManager.gatt = g
+                cont.invokeOnCancellation {
+                    g.disconnect()
+                    g.close()
+                }
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun sendStatusQueryCommand(gatt: BluetoothGatt) {
+        val queryReq = gatt.findCharacteristic(QUERY_REQ_UUID) ?: run {
+            Log.e(TAG, "Query request characteristic not found"); return
+        }
+        queryReq.value = STATUS_QUERY_CMD
+        queryReq.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        gatt.writeCharacteristic(queryReq)
+    }
+
+    /**
+     * Parses a BLE status query response (command 0x13).
+     * Format: [length, 0x13, error_code, (id, len, value_bytes)...]
+     */
+    private fun parseStatusQueryResponse(data: ByteArray): CameraInfo? {
+        if (data.size < 3 || data[1] != 0x13.toByte() || data[2] != 0x00.toByte()) {
+            Log.e(TAG, "Unexpected query response: ${data.joinToString { "0x%02x".format(it) }}")
+            return null
+        }
+        var i = 3
+        var battery = -1
+        var spaceKb = -1L
+        while (i + 1 < data.size) {
+            val id = data[i].toInt() and 0xFF
+            val len = data[i + 1].toInt() and 0xFF
+            i += 2
+            if (i + len > data.size) break
+            when (id) {
+                0x02 -> if (len == 1) battery = data[i].toInt() and 0xFF
+                0x36 -> if (len == 4) {
+                    spaceKb = ((data[i].toLong() and 0xFF) shl 24) or
+                              ((data[i + 1].toLong() and 0xFF) shl 16) or
+                              ((data[i + 2].toLong() and 0xFF) shl 8) or
+                              (data[i + 3].toLong() and 0xFF)
+                }
+            }
+            i += len
+        }
+        return CameraInfo(
+            batteryPercent = battery,
+            remainingSpaceMb = if (spaceKb >= 0) spaceKb / 1024L else -1L,
+            remainingVideoSec = -1L
+        )
     }
 
     fun close() {
