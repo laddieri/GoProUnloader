@@ -15,6 +15,7 @@ import com.gopro.unloader.ble.WifiCredentials
 import com.gopro.unloader.model.DownloadStatus
 import com.gopro.unloader.model.MediaFile
 import com.gopro.unloader.model.TranscodeStatus
+import com.gopro.unloader.util.MediaStoreHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -223,6 +224,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (out != null) {
                         file.transcodeStatus = TranscodeStatus.DONE
                         if (!keepOriginals) src.delete()
+                        MediaStoreHelper.addVideoToGallery(context, out)
                     } else {
                         file.transcodeStatus = TranscodeStatus.SKIPPED
                     }
@@ -231,6 +233,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         } else {
             log("Skipping transcode (--no-transcode).")
+            // Publish raw MP4s directly since there is no transcoded copy
+            for ((_, dest) in downloaded) {
+                if (dest.name.uppercase().endsWith(".MP4")) {
+                    MediaStoreHelper.addVideoToGallery(context, dest)
+                }
+            }
         }
 
         val dlCount = downloaded.size
@@ -238,7 +246,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val skipCount = files.count { it.downloadStatus == DownloadStatus.SKIPPED }
         log("─────────────────────────")
         log("Done! Downloaded: $dlCount  Skipped: $skipCount  Errors: $errCount")
-        log("Output: ${outputDir.absolutePath}")
+        log("Files saved to Movies/GoProUnloader")
         _phase.value = Phase.DONE
     }
 
