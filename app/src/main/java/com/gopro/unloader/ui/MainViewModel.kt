@@ -46,6 +46,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _cameraInfo = MutableLiveData<CameraInfo?>()
     val cameraInfo: LiveData<CameraInfo?> = _cameraInfo
 
+    private val _isRecording = MutableLiveData<Boolean?>(null)
+    val isRecording: LiveData<Boolean?> = _isRecording
+
     // ----------------------------------------------------------- settings
     var skipBle: Boolean = false
     var keepOriginals: Boolean = false
@@ -70,7 +73,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // -------------------------------------------------------------- enums
     enum class Phase {
-        IDLE, BLE_SCAN, WIFI_WAIT, FETCHING_LIST, LIST_READY, DOWNLOADING, TRANSCODING, DONE
+        IDLE, BLE_SCAN, WIFI_WAIT, FETCHING_LIST, LIST_READY, DOWNLOADING, TRANSCODING, DONE,
+        STARTING_RECORDING, STOPPING_RECORDING
     }
 
     // --------------------------------------------------------------- actions
@@ -179,6 +183,85 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 _isBusy.value = false
                 if (_phase.value == Phase.WIFI_WAIT) _phase.value = Phase.IDLE
+            }
+        }
+    }
+
+    /**
+     * Starts recording on the GoPro.
+     * If the camera is reachable via WiFi, sends the command directly.
+     * If not, wakes the camera via Bluetooth LE first, then waits for WiFi.
+     */
+    fun startRecording() {
+        if (_isBusy.value == true) return
+        _isBusy.value = true
+
+        viewModelScope.launch {
+            try {
+                _phase.value = Phase.STARTING_RECORDING
+                log("Checking camera connection…")
+
+                val reachable = withContext(Dispatchers.IO) { goProApi.isCameraReachable() }
+                if (!reachable) {
+                    // Camera not on WiFi — wake it via BLE
+                    _phase.value = Phase.BLE_SCAN
+                    log("Camera not reachable. Waking via Bluetooth LE…")
+                    val bleManager = GoProBleManager(context).also { bleMgr = it }
+                    val creds = bleManager.findAndEnableWifi(knownAddress = bleAddress) { msg -> log(msg) }
+                    if (creds == null) {
+                        log("BLE wake failed. Turn the camera on manually, then try again.")
+                        return@launch
+                    }
+                    _wifiCredentials.postValue(creds)
+                    log("Camera WiFi AP enabled. Connect your phone to \"${creds.ssid}\" then the recording will start.")
+
+                    _phase.value = Phase.WIFI_WAIT
+                    if (!waitForCameraConnection()) {
+                        log("Cannot reach camera over WiFi. Connect to the GoPro network and try again.")
+                        return@launch
+                    }
+                }
+
+                _phase.value = Phase.STARTING_RECORDING
+                log("Sending start recording command…")
+                val ok = withContext(Dispatchers.IO) { goProApi.startRecording() }
+                if (ok) {
+                    _isRecording.postValue(true)
+                    log("Recording started.")
+                } else {
+                    log("Failed to start recording. Check the camera mode and try again.")
+                }
+                _phase.value = Phase.IDLE
+            } finally {
+                _isBusy.value = false
+                bleMgr?.close()
+                bleMgr = null
+            }
+        }
+    }
+
+    /**
+     * Stops recording on the GoPro.
+     * The camera must already be reachable over WiFi.
+     */
+    fun stopRecording() {
+        if (_isBusy.value == true) return
+        _isBusy.value = true
+
+        viewModelScope.launch {
+            try {
+                _phase.value = Phase.STOPPING_RECORDING
+                log("Sending stop recording command…")
+                val ok = withContext(Dispatchers.IO) { goProApi.stopRecording() }
+                if (ok) {
+                    _isRecording.postValue(false)
+                    log("Recording stopped.")
+                } else {
+                    log("Failed to stop recording. Is the camera reachable on the GoPro WiFi network?")
+                }
+                _phase.value = Phase.IDLE
+            } finally {
+                _isBusy.value = false
             }
         }
     }

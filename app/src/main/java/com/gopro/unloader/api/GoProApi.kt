@@ -19,6 +19,8 @@ class GoProApi {
         const val MEDIA_DELETE_URL = "$GOPRO_BASE/gopro/media/delete/file"
         const val MEDIA_BASE_URL = "$GOPRO_BASE/videos/DCIM"
         const val CAMERA_STATE_URL = "$GOPRO_BASE/gopro/camera/state"
+        const val SHUTTER_START_URL = "$GOPRO_BASE/gopro/camera/shutter/start"
+        const val SHUTTER_STOP_URL = "$GOPRO_BASE/gopro/camera/shutter/stop"
     }
 
     private val client = OkHttpClient.Builder()
@@ -150,6 +152,46 @@ class GoProApi {
         }
         Log.w(TAG, "Failed to delete ${file.name} from camera")
         return false
+    }
+
+    /**
+     * Returns true if the camera is currently recording, false if idle, or null if unreachable.
+     * Uses status field 8 (encodingActive) from the camera state endpoint.
+     */
+    fun isRecording(): Boolean? {
+        return try {
+            val request = Request.Builder().url(CAMERA_STATE_URL).build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string() ?: return null
+                val status = JSONObject(body).optJSONObject("status") ?: return null
+                status.optInt("_8", 0) == 1
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Sends the shutter/start command to begin recording. Returns true on success. */
+    fun startRecording(): Boolean {
+        return try {
+            val request = Request.Builder().url(SHUTTER_START_URL).build()
+            client.newCall(request).execute().use { it.isSuccessful }
+        } catch (e: Exception) {
+            Log.e(TAG, "startRecording failed", e)
+            false
+        }
+    }
+
+    /** Sends the shutter/stop command to stop recording. Returns true on success. */
+    fun stopRecording(): Boolean {
+        return try {
+            val request = Request.Builder().url(SHUTTER_STOP_URL).build()
+            client.newCall(request).execute().use { it.isSuccessful }
+        } catch (e: Exception) {
+            Log.e(TAG, "stopRecording failed", e)
+            false
+        }
     }
 
     /** Sends a keepalive ping. Call periodically during downloads. */
