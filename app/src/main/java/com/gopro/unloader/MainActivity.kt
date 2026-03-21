@@ -15,6 +15,7 @@ import android.provider.Settings
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.widget.CheckBox
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -31,7 +32,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private val viewModel: MainViewModel by viewModels()
-    private val adapter = MediaListAdapter()
+    private lateinit var adapter: MediaListAdapter
 
     // ----------------------------------------- Permission launcher
     private val permissionLauncher = registerForActivityResult(
@@ -63,6 +64,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
 
+        adapter = MediaListAdapter { updateSelectionCount() }
         binding.recyclerView.layoutManager = LinearLayoutManager(this)
         binding.recyclerView.adapter = adapter
 
@@ -92,7 +94,6 @@ class MainActivity : AppCompatActivity() {
     private fun observeViewModel() {
         viewModel.statusLog.observe(this) { log ->
             binding.tvStatusLog.text = log
-            // Auto-scroll to bottom
             binding.scrollViewLog.post {
                 binding.scrollViewLog.fullScroll(View.FOCUS_DOWN)
             }
@@ -100,7 +101,9 @@ class MainActivity : AppCompatActivity() {
 
         viewModel.mediaFiles.observe(this) { files ->
             adapter.submitList(files.toList())
-            binding.tvFileCount.text = if (files.isEmpty()) "" else "${files.size} file(s)"
+            val count = files.size
+            binding.tvFileCount.text = if (count == 0) "" else "$count file(s)"
+            updateSelectionCount()
         }
 
         viewModel.wifiCredentials.observe(this) { creds ->
@@ -123,7 +126,6 @@ class MainActivity : AppCompatActivity() {
             binding.btnListFiles.isEnabled = !busy
             binding.progressGlobal.visibility = if (busy) View.VISIBLE else View.GONE
 
-            // Foreground service management
             val intent = Intent(this, GoProForegroundService::class.java)
             if (busy) {
                 intent.putExtra("message", "Offloading GoPro footage…")
@@ -142,11 +144,19 @@ class MainActivity : AppCompatActivity() {
                 MainViewModel.Phase.BLE_SCAN -> "Scanning via Bluetooth LE…"
                 MainViewModel.Phase.WIFI_WAIT -> "Waiting for WiFi connection…"
                 MainViewModel.Phase.FETCHING_LIST -> "Fetching media list…"
+                MainViewModel.Phase.LIST_READY -> "Ready — select files to transfer"
                 MainViewModel.Phase.DOWNLOADING -> "Downloading…"
                 MainViewModel.Phase.TRANSCODING -> "Transcoding to 1080p…"
                 MainViewModel.Phase.DONE -> "Complete!"
                 MainViewModel.Phase.IDLE -> ""
             }
+
+            val showControls = phase == MainViewModel.Phase.LIST_READY
+            binding.layoutTransferControls.visibility = if (showControls) View.VISIBLE else View.GONE
+
+            val transferring = phase == MainViewModel.Phase.DOWNLOADING ||
+                phase == MainViewModel.Phase.TRANSCODING
+            binding.btnTransferSelected.isEnabled = !transferring
         }
     }
 
@@ -154,15 +164,69 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupButtons() {
         binding.btnStartOffload.setOnClickListener {
-            withPermissionsAndBluetooth { viewModel.startOffload() }
+            withPermissionsAndBluetooth { viewModel.scanAndList() }
         }
+
         binding.btnListFiles.setOnClickListener {
-            if (viewModel.skipBle) {
-                viewModel.listFiles()
-            } else {
-                withPermissionsAndBluetooth { viewModel.listFiles() }
-            }
+            viewModel.listFiles()
         }
+
+        binding.btnSelectAll.setOnClickListener {
+            adapter.selectAll(true)
+            updateSelectionCount()
+        }
+
+        binding.btnDeselectAll.setOnClickListener {
+            adapter.selectAll(false)
+            updateSelectionCount()
+        }
+
+        binding.btnTransferSelected.setOnClickListener {
+            val selected = adapter.selectedCount()
+            if (selected == 0) {
+                Toast.makeText(this, "No files selected.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            showTransferConfirmDialog(selected)
+        }
+    }
+
+    private fun updateSelectionCount() {
+        val total = adapter.currentList.size
+        val selected = adapter.selectedCount()
+        binding.tvSelectedCount.text = "$selected of $total selected"
+        binding.btnTransferSelected.isEnabled =
+            selected > 0 && viewModel.phase.value == MainViewModel.Phase.LIST_READY
+    }
+
+    // =========================================================== transfer confirm dialog
+
+    private fun showTransferConfirmDialog(selectedCount: Int) {
+        val dialogView = layoutInflater.inflate(android.R.layout.activity_list_item, null)
+
+        var transcode = true
+        var deleteFromCamera = true
+
+        val items = arrayOf(
+            "Transcode videos to 1080p",
+            "Delete from camera after transfer"
+        )
+        val checked = booleanArrayOf(transcode, deleteFromCamera)
+
+        AlertDialog.Builder(this)
+            .setTitle("Transfer $selectedCount file(s)")
+            .setMessage("Choose options for this transfer:")
+            .setMultiChoiceItems(items, checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton("Transfer") { _, _ ->
+                viewModel.startTransfer(
+                    transcode = checked[0],
+                    deleteFromCamera = checked[1]
+                )
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     // =========================================================== permissions
@@ -207,15 +271,11 @@ class MainActivity : AppCompatActivity() {
     private fun showSettingsDialog() {
         val items = arrayOf(
             "Skip BLE (WiFi already connected)",
-            "Keep originals after transcode",
-            "Don't delete files from camera",
-            "Skip transcoding"
+            "Keep originals after transcode"
         )
         val checked = booleanArrayOf(
             viewModel.skipBle,
-            viewModel.keepOriginals,
-            viewModel.noDelete,
-            viewModel.noTranscode
+            viewModel.keepOriginals
         )
 
         AlertDialog.Builder(this)
@@ -226,8 +286,6 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("Apply") { _, _ ->
                 viewModel.skipBle = checked[0]
                 viewModel.keepOriginals = checked[1]
-                viewModel.noDelete = checked[2]
-                viewModel.noTranscode = checked[3]
             }
             .setNeutralButton("Set BLE Address") { _, _ ->
                 showBleAddressDialog()

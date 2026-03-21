@@ -45,9 +45,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // ----------------------------------------------------------- settings
     var skipBle: Boolean = false
     var keepOriginals: Boolean = false
-    var noDelete: Boolean = false
-    var noTranscode: Boolean = false
-    var forceRedownload: Boolean = false
     var bleAddress: String? = null
 
     // --------------------------------------------------------------- helpers
@@ -69,13 +66,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // -------------------------------------------------------------- enums
     enum class Phase {
-        IDLE, BLE_SCAN, WIFI_WAIT, FETCHING_LIST, DOWNLOADING, TRANSCODING, DONE
+        IDLE, BLE_SCAN, WIFI_WAIT, FETCHING_LIST, LIST_READY, DOWNLOADING, TRANSCODING, DONE
     }
 
     // --------------------------------------------------------------- actions
 
-    /** Full offload workflow: BLE → WiFi check → list → download → delete → transcode */
-    fun startOffload() {
+    /**
+     * Phase 1: BLE scan → WiFi connect → fetch and display the file list.
+     * Stops at LIST_READY so the user can review and select files before transferring.
+     */
+    fun scanAndList() {
         if (_isBusy.value == true) return
         _isBusy.value = true
         _statusLog.value = ""
@@ -83,17 +83,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             try {
-                runOffload()
+                if (!skipBle) {
+                    _phase.value = Phase.BLE_SCAN
+                    log("Starting BLE scan…")
+                    val bleManager = GoProBleManager(context).also { bleMgr = it }
+                    val creds = bleManager.findAndEnableWifi(knownAddress = bleAddress) { msg -> log(msg) }
+                    if (creds == null) {
+                        log("BLE failed. Connect to GoPro WiFi manually, then use 'List Files (WiFi)'.")
+                        return@launch
+                    }
+                    _wifiCredentials.postValue(creds)
+                    log("WiFi AP credentials: SSID=${creds.ssid} / Password=${creds.password}")
+                    log("Please connect your device to the GoPro WiFi network now.")
+                    _phase.value = Phase.WIFI_WAIT
+                    if (!waitForCameraConnection()) return@launch
+                } else {
+                    log("Skipping BLE. Checking WiFi connection…")
+                    _phase.value = Phase.WIFI_WAIT
+                    if (!waitForCameraConnection()) return@launch
+                }
+
+                _phase.value = Phase.FETCHING_LIST
+                val files = fetchAndShowList()
+                if (files.isEmpty()) {
+                    log("No media files found on GoPro.")
+                    return@launch
+                }
+                _phase.value = Phase.LIST_READY
+                log("Select the files you want to transfer, then tap Transfer Selected.")
             } finally {
                 _isBusy.value = false
-                _phase.value = Phase.IDLE
                 bleMgr?.close()
                 bleMgr = null
             }
         }
     }
 
-    /** Fetch and display the file list without downloading. */
+    /** Fetch and display the file list without BLE (assumes WiFi already connected). */
     fun listFiles() {
         if (_isBusy.value == true) return
         _isBusy.value = true
@@ -102,48 +128,55 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             try {
-                if (!ensureWifiConnected()) return@launch
-                fetchAndShowList()
+                _phase.value = Phase.WIFI_WAIT
+                if (!waitForCameraConnection()) return@launch
+                _phase.value = Phase.FETCHING_LIST
+                val files = fetchAndShowList()
+                if (files.isEmpty()) {
+                    log("No media files found on GoPro.")
+                    return@launch
+                }
+                _phase.value = Phase.LIST_READY
+                log("Select the files you want to transfer, then tap Transfer Selected.")
             } finally {
                 _isBusy.value = false
-                _phase.value = Phase.IDLE
+                _phase.value = if (_phase.value == Phase.FETCHING_LIST) Phase.IDLE else _phase.value
+            }
+        }
+    }
+
+    /**
+     * Phase 2: Download + optionally transcode + optionally delete from camera.
+     * Only transfers files that have [MediaFile.selected] == true.
+     */
+    fun startTransfer(transcode: Boolean, deleteFromCamera: Boolean) {
+        val filesToTransfer = _mediaFiles.value?.filter { it.selected } ?: emptyList()
+        if (filesToTransfer.isEmpty()) {
+            log("No files selected.")
+            return
+        }
+        if (_isBusy.value == true) return
+        _isBusy.value = true
+
+        viewModelScope.launch {
+            try {
+                runTransfer(filesToTransfer, transcode, deleteFromCamera)
+            } finally {
+                _isBusy.value = false
             }
         }
     }
 
     // ----------------------------------------------------------- private
 
-    private suspend fun runOffload() {
-        if (!skipBle) {
-            _phase.value = Phase.BLE_SCAN
-            log("Starting BLE scan…")
-            val bleManager = GoProBleManager(context).also { bleMgr = it }
-            val creds = bleManager.findAndEnableWifi(knownAddress = bleAddress) { msg -> log(msg) }
-            if (creds == null) {
-                log("BLE failed. Connect to GoPro WiFi manually, then retry with 'Skip BLE'.")
-                return
-            }
-            _wifiCredentials.postValue(creds)
-            log("WiFi AP credentials: SSID=${creds.ssid} / Password=${creds.password}")
-            log("Please connect your device to the GoPro WiFi network now.")
-            _phase.value = Phase.WIFI_WAIT
-            waitForCameraConnection()
-        } else {
-            log("Skipping BLE (--skip-ble). Checking WiFi connection…")
-            if (!ensureWifiConnected()) return
-        }
-
-        _phase.value = Phase.FETCHING_LIST
-        val files = fetchAndShowList()
-        if (files.isEmpty()) {
-            log("No media files found on GoPro.")
-            return
-        }
-
+    private suspend fun runTransfer(
+        files: List<MediaFile>,
+        transcode: Boolean,
+        deleteFromCamera: Boolean
+    ) {
         _phase.value = Phase.DOWNLOADING
         log("Starting download of ${files.size} file(s)…")
 
-        // Keepalive coroutine
         val keepAliveJob = viewModelScope.launch(Dispatchers.IO) {
             while (isActive) {
                 goProApi.keepAlive()
@@ -162,7 +195,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     downloadMgr.download(
                         file = file,
                         destDir = outputDir,
-                        forceRedownload = forceRedownload,
                         onProgress = { pct ->
                             file.downloadProgress = pct
                             notifyListChanged()
@@ -174,13 +206,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     file.downloadStatus = DownloadStatus.DOWNLOADED
                     file.localPath = dest.absolutePath
                     downloaded.add(file to dest)
-                    log("Downloaded: ${file.name} → ${dest.absolutePath}")
+                    log("Downloaded: ${file.name}")
                 } else {
-                    val wasSkipped = dest == null &&
-                        File(outputDir, "raw/${file.name}").exists()
-                    file.downloadStatus =
-                        if (wasSkipped) DownloadStatus.SKIPPED else DownloadStatus.ERROR
-                    log("${if (wasSkipped) "Skipped" else "Error"}: ${file.name}")
+                    file.downloadStatus = DownloadStatus.ERROR
+                    log("Error: ${file.name}")
                 }
                 notifyListChanged()
             }
@@ -188,19 +217,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             keepAliveJob.cancel()
         }
 
-        // Delete from camera
-        if (!noDelete) {
+        if (deleteFromCamera) {
             log("Deleting ${downloaded.size} file(s) from camera…")
             for ((file, _) in downloaded) {
                 val ok = withContext(Dispatchers.IO) { goProApi.deleteFile(file) }
                 log(if (ok) "  Deleted ${file.name} from GoPro." else "  Could not delete ${file.name}.")
             }
-        } else {
-            log("Skipping camera deletion (--no-delete).")
         }
 
-        // Transcode
-        if (!noTranscode) {
+        if (transcode) {
             val mp4s = downloaded.filter { (f, _) -> f.name.uppercase().endsWith(".MP4") }
             if (mp4s.isNotEmpty()) {
                 _phase.value = Phase.TRANSCODING
@@ -232,8 +257,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         } else {
-            log("Skipping transcode (--no-transcode).")
-            // Publish raw MP4s directly since there is no transcoded copy
             for ((_, dest) in downloaded) {
                 if (dest.name.uppercase().endsWith(".MP4")) {
                     MediaStoreHelper.addVideoToGallery(context, dest)
@@ -243,17 +266,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val dlCount = downloaded.size
         val errCount = files.count { it.downloadStatus == DownloadStatus.ERROR }
-        val skipCount = files.count { it.downloadStatus == DownloadStatus.SKIPPED }
         log("─────────────────────────")
-        log("Done! Downloaded: $dlCount  Skipped: $skipCount  Errors: $errCount")
+        log("Done! Transferred: $dlCount  Errors: $errCount")
         log("Files saved to Movies/GoProUnloader")
         _phase.value = Phase.DONE
-    }
-
-    private suspend fun ensureWifiConnected(): Boolean {
-        _phase.value = Phase.WIFI_WAIT
-        log("Checking GoPro WiFi connection…")
-        return waitForCameraConnection()
     }
 
     private suspend fun waitForCameraConnection(): Boolean {

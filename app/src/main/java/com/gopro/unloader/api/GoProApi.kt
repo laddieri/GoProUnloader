@@ -80,8 +80,9 @@ class GoProApi {
                     ) continue
 
                     val size = f.optLong("s", 0L)
+                    val duration = f.optString("dur", "0").toLongOrNull() ?: 0L
                     val url = "$MEDIA_BASE_URL/$directory/$name"
-                    files.add(MediaFile(name = name, directory = directory, size = size, url = url))
+                    files.add(MediaFile(name = name, directory = directory, size = size, url = url, duration = duration))
                 }
             }
             files
