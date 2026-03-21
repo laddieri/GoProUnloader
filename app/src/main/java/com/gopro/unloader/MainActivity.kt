@@ -139,6 +139,36 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        viewModel.cameraInfo.observe(this) { info ->
+            if (info == null) {
+                binding.cardCameraInfo.visibility = View.GONE
+                return@observe
+            }
+            binding.cardCameraInfo.visibility = View.VISIBLE
+
+            // Battery
+            if (info.batteryPercent >= 0) {
+                binding.tvBatteryLevel.text = "${info.batteryPercent}%"
+                val battMin = info.estimatedBatteryVideoSec / 60
+                binding.tvBatteryEstimate.text =
+                    "≈ $battMin min of recording remaining (estimated at 1080p)"
+            } else {
+                binding.tvBatteryLevel.text = "Unknown"
+                binding.tvBatteryEstimate.text = ""
+            }
+
+            // Storage
+            if (info.remainingSpaceMb >= 0) {
+                binding.tvStorageFree.text = formatMb(info.remainingSpaceMb)
+                val storMin = info.storageVideoSec / 60
+                val source = if (info.remainingVideoSec >= 0) "camera-reported" else "estimated at 1080p ~60 Mbps"
+                binding.tvStorageEstimate.text = "≈ $storMin min of video ($source)"
+            } else {
+                binding.tvStorageFree.text = "Unknown"
+                binding.tvStorageEstimate.text = ""
+            }
+        }
+
         viewModel.phase.observe(this) { phase ->
             binding.tvPhase.text = when (phase) {
                 MainViewModel.Phase.BLE_SCAN -> "Scanning via Bluetooth LE…"
@@ -163,6 +193,10 @@ class MainActivity : AppCompatActivity() {
     // =========================================================== buttons
 
     private fun setupButtons() {
+        binding.btnQuickConnect.setOnClickListener {
+            viewModel.quickConnect()
+        }
+
         binding.btnStartOffload.setOnClickListener {
             withPermissionsAndBluetooth { viewModel.scanAndList() }
         }
@@ -292,6 +326,11 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun formatMb(mb: Long): String = when {
+        mb >= 1024 -> "%.1f GB".format(mb / 1024.0)
+        else -> "$mb MB"
     }
 
     private fun showBleAddressDialog() {
