@@ -121,9 +121,19 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        viewModel.isRecording.observe(this) { recording ->
+            binding.tvRecordingStatus.text = when (recording) {
+                true -> getString(R.string.recording_status_active)
+                false -> getString(R.string.recording_status_stopped)
+                null -> getString(R.string.recording_status_unknown)
+            }
+        }
+
         viewModel.isBusy.observe(this) { busy ->
             binding.btnStartOffload.isEnabled = !busy
             binding.btnListFiles.isEnabled = !busy
+            binding.btnStartRecording.isEnabled = !busy
+            binding.btnStopRecording.isEnabled = !busy
             binding.progressGlobal.visibility = if (busy) View.VISIBLE else View.GONE
 
             val intent = Intent(this, GoProForegroundService::class.java)
@@ -178,6 +188,8 @@ class MainActivity : AppCompatActivity() {
                 MainViewModel.Phase.DOWNLOADING -> "Downloading…"
                 MainViewModel.Phase.TRANSCODING -> "Transcoding to 1080p…"
                 MainViewModel.Phase.DONE -> "Complete!"
+                MainViewModel.Phase.STARTING_RECORDING -> "Starting recording…"
+                MainViewModel.Phase.STOPPING_RECORDING -> "Stopping recording…"
                 MainViewModel.Phase.IDLE -> ""
             }
 
@@ -195,6 +207,14 @@ class MainActivity : AppCompatActivity() {
     private fun setupButtons() {
         binding.btnQuickConnect.setOnClickListener {
             viewModel.quickConnect()
+        }
+
+        binding.btnStartRecording.setOnClickListener {
+            withPermissionsAndBluetooth { viewModel.startRecording() }
+        }
+
+        binding.btnStopRecording.setOnClickListener {
+            viewModel.stopRecording()
         }
 
         binding.btnStartOffload.setOnClickListener {

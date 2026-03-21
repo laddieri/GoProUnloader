@@ -8,4 +8,10 @@
     <string name="btn_quick_connect">Quick Connect (Battery &amp; Storage)</string>
     <string name="btn_select_all">Select All</string>
     <string name="btn_deselect_all">Deselect All</string>
+    <string name="card_recording_title">Camera Recording</string>
+    <string name="btn_start_recording">Start Recording</string>
+    <string name="btn_stop_recording">Stop Recording</string>
+    <string name="recording_status_unknown">Status: unknown — tap Start Recording to begin</string>
+    <string name="recording_status_active">● Recording</string>
+    <string name="recording_status_stopped">■ Stopped</string>
 </resources>
