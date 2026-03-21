@@ -12,6 +12,7 @@ import com.gopro.unloader.api.GoProApi
 import com.gopro.unloader.api.TranscodeManager
 import com.gopro.unloader.ble.GoProBleManager
 import com.gopro.unloader.ble.WifiCredentials
+import com.gopro.unloader.model.CameraInfo
 import com.gopro.unloader.model.DownloadStatus
 import com.gopro.unloader.model.MediaFile
 import com.gopro.unloader.model.TranscodeStatus
@@ -41,6 +42,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _phase = MutableLiveData(Phase.IDLE)
     val phase: LiveData<Phase> = _phase
+
+    private val _cameraInfo = MutableLiveData<CameraInfo?>()
+    val cameraInfo: LiveData<CameraInfo?> = _cameraInfo
 
     // ----------------------------------------------------------- settings
     var skipBle: Boolean = false
@@ -141,6 +145,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 _isBusy.value = false
                 _phase.value = if (_phase.value == Phase.FETCHING_LIST) Phase.IDLE else _phase.value
+            }
+        }
+    }
+
+    /**
+     * Quick check: connects to the GoPro over WiFi (no BLE, no file transfer),
+     * reads battery % and SD card free space, and posts estimates to [cameraInfo].
+     */
+    fun quickConnect() {
+        if (_isBusy.value == true) return
+        _isBusy.value = true
+        _cameraInfo.value = null
+
+        viewModelScope.launch {
+            try {
+                _phase.value = Phase.WIFI_WAIT
+                log("Connecting to GoPro…")
+                val reachable = withContext(Dispatchers.IO) { goProApi.isCameraReachable() }
+                if (!reachable) {
+                    log("Cannot reach GoPro. Make sure your phone is connected to the GoPro WiFi network.")
+                    return@launch
+                }
+                log("Connected. Reading camera stats…")
+                val info = withContext(Dispatchers.IO) { goProApi.getCameraInfo() }
+                if (info == null) {
+                    log("Could not read camera info.")
+                    return@launch
+                }
+                _cameraInfo.postValue(info)
+                log("Camera stats retrieved.")
+                _phase.value = Phase.IDLE
+            } finally {
+                _isBusy.value = false
+                if (_phase.value == Phase.WIFI_WAIT) _phase.value = Phase.IDLE
             }
         }
     }

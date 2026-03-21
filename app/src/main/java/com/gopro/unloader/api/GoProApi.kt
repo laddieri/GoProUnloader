@@ -1,6 +1,7 @@
 package com.gopro.unloader.api
 
 import android.util.Log
+import com.gopro.unloader.model.CameraInfo
 import com.gopro.unloader.model.MediaFile
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -32,6 +33,38 @@ class GoProApi {
             client.newCall(request).execute().use { it.isSuccessful }
         } catch (e: Exception) {
             false
+        }
+    }
+
+    /**
+     * Fetches battery %, remaining SD space (status 54, in KB), and remaining
+     * recording time (status 70, in seconds) in a single camera-state call.
+     * Returns null if the camera is unreachable.
+     */
+    fun getCameraInfo(): CameraInfo? {
+        return try {
+            val request = Request.Builder().url(CAMERA_STATE_URL).build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val status = JSONObject(response.body?.string() ?: return null)
+                    .optJSONObject("status") ?: return null
+
+                val battery = status.optInt("_2", -1)
+                // Status 54: remaining space in KB (uint64 in spec, fits Long)
+                val spaceKb = status.optLong("_54", -1L)
+                val spaceMb = if (spaceKb >= 0) spaceKb / 1024L else -1L
+                // Status 70: remaining video time in seconds for current mode
+                val videoSec = status.optLong("_70", -1L)
+
+                CameraInfo(
+                    batteryPercent = battery,
+                    remainingSpaceMb = spaceMb,
+                    remainingVideoSec = videoSec
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "getCameraInfo failed", e)
+            null
         }
     }
 
