@@ -5,6 +5,7 @@
     <string name="btn_scan_gopro">Scan GoPro</string>
     <string name="btn_list_files">List Files (WiFi)</string>
     <string name="btn_transfer_selected">Transfer Selected</string>
+    <string name="btn_delete_from_gopro">Delete from GoPro</string>
     <string name="btn_quick_connect">Quick Connect (Battery &amp; Storage)</string>
     <string name="btn_select_all">Select All</string>
     <string name="btn_deselect_all">Deselect All</string>
