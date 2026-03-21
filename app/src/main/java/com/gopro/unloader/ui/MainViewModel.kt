@@ -74,7 +74,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // -------------------------------------------------------------- enums
     enum class Phase {
         IDLE, BLE_SCAN, WIFI_WAIT, FETCHING_LIST, LIST_READY, DOWNLOADING, TRANSCODING, DONE,
-        STARTING_RECORDING, STOPPING_RECORDING
+        STARTING_RECORDING, STOPPING_RECORDING, DELETING
     }
 
     // --------------------------------------------------------------- actions
@@ -282,6 +282,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 runTransfer(filesToTransfer, transcode, deleteFromCamera)
+            } finally {
+                _isBusy.value = false
+            }
+        }
+    }
+
+    /**
+     * Delete selected files from the GoPro camera without downloading them.
+     */
+    fun deleteSelectedFiles() {
+        val filesToDelete = _mediaFiles.value?.filter { it.selected } ?: emptyList()
+        if (filesToDelete.isEmpty()) {
+            log("No files selected.")
+            return
+        }
+        if (_isBusy.value == true) return
+        _isBusy.value = true
+
+        viewModelScope.launch {
+            try {
+                _phase.value = Phase.DELETING
+                log("Deleting ${filesToDelete.size} file(s) from GoPro…")
+                var deleted = 0
+                var failed = 0
+                for (file in filesToDelete) {
+                    val ok = withContext(Dispatchers.IO) { goProApi.deleteFile(file) }
+                    if (ok) {
+                        deleted++
+                        log("  Deleted ${file.name}")
+                    } else {
+                        failed++
+                        log("  Could not delete ${file.name}")
+                    }
+                }
+                log("─────────────────────────")
+                log("Done! Deleted: $deleted  Errors: $failed")
+                // Refresh the file list so deleted files no longer appear
+                _phase.value = Phase.FETCHING_LIST
+                val files = fetchAndShowList()
+                _phase.value = if (files.isEmpty()) Phase.IDLE else Phase.LIST_READY
+                if (files.isNotEmpty()) log("Select files to transfer, or delete more.")
             } finally {
                 _isBusy.value = false
             }

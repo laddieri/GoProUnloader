@@ -134,6 +134,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnListFiles.isEnabled = !busy
             binding.btnStartRecording.isEnabled = !busy
             binding.btnStopRecording.isEnabled = !busy
+            binding.btnDeleteFromGopro.isEnabled = !busy
             binding.progressGlobal.visibility = if (busy) View.VISIBLE else View.GONE
 
             val intent = Intent(this, GoProForegroundService::class.java)
@@ -190,15 +191,18 @@ class MainActivity : AppCompatActivity() {
                 MainViewModel.Phase.DONE -> "Complete!"
                 MainViewModel.Phase.STARTING_RECORDING -> "Starting recording…"
                 MainViewModel.Phase.STOPPING_RECORDING -> "Stopping recording…"
+                MainViewModel.Phase.DELETING -> "Deleting from GoPro…"
                 MainViewModel.Phase.IDLE -> ""
             }
 
             val showControls = phase == MainViewModel.Phase.LIST_READY
             binding.layoutTransferControls.visibility = if (showControls) View.VISIBLE else View.GONE
 
-            val transferring = phase == MainViewModel.Phase.DOWNLOADING ||
-                phase == MainViewModel.Phase.TRANSCODING
-            binding.btnTransferSelected.isEnabled = !transferring
+            val busy = phase == MainViewModel.Phase.DOWNLOADING ||
+                phase == MainViewModel.Phase.TRANSCODING ||
+                phase == MainViewModel.Phase.DELETING
+            binding.btnTransferSelected.isEnabled = !busy
+            binding.btnDeleteFromGopro.isEnabled = !busy
         }
     }
 
@@ -243,6 +247,15 @@ class MainActivity : AppCompatActivity() {
             }
             showTransferConfirmDialog(selected)
         }
+
+        binding.btnDeleteFromGopro.setOnClickListener {
+            val selected = adapter.selectedCount()
+            if (selected == 0) {
+                Toast.makeText(this, "No files selected.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            showDeleteConfirmDialog(selected)
+        }
     }
 
     private fun updateSelectionCount() {
@@ -278,6 +291,17 @@ class MainActivity : AppCompatActivity() {
                     transcode = checked[0],
                     deleteFromCamera = checked[1]
                 )
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showDeleteConfirmDialog(selectedCount: Int) {
+        AlertDialog.Builder(this)
+            .setTitle("Delete $selectedCount file(s) from GoPro?")
+            .setMessage("This will permanently delete the selected files from the camera's SD card without transferring them to your phone. This cannot be undone.")
+            .setPositiveButton("Delete") { _, _ ->
+                viewModel.deleteSelectedFiles()
             }
             .setNegativeButton("Cancel", null)
             .show()
