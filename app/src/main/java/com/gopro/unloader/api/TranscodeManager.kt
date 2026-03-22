@@ -1,9 +1,9 @@
 package com.gopro.unloader.api
 
+import android.media.MediaMetadataRetriever
 import android.util.Log
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegKitConfig
-import com.arthenica.ffmpegkit.FFprobeKit
 import com.arthenica.ffmpegkit.ReturnCode
 import com.arthenica.ffmpegkit.StatisticsCallback
 import java.io.File
@@ -89,21 +89,40 @@ class TranscodeManager {
         }
     }
 
+    /**
+     * Use Android's [MediaMetadataRetriever] to get video height.
+     * This is more reliable than ffprobe, which may not be bundled
+     * in minimal ffmpegkit packages.
+     */
     private fun probeHeight(file: File): Int? {
-        val session = FFprobeKit.execute(
-            "-v error -select_streams v:0 -show_entries stream=height " +
-                    "-of csv=p=0 \"${file.absolutePath}\""
-        )
-        val output = session.output?.trim() ?: return null
-        return output.toIntOrNull()
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                ?.toIntOrNull()
+        } catch (e: Exception) {
+            Log.e(TAG, "probeHeight failed for ${file.name}", e)
+            null
+        } finally {
+            retriever.release()
+        }
     }
 
+    /**
+     * Use Android's [MediaMetadataRetriever] to get video duration in seconds.
+     */
     private fun probeDuration(file: File): Double? {
-        val session = FFprobeKit.execute(
-            "-v error -show_entries format=duration " +
-                    "-of csv=p=0 \"${file.absolutePath}\""
-        )
-        val output = session.output?.trim() ?: return null
-        return output.toDoubleOrNull()
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull()
+                ?.let { it / 1000.0 }
+        } catch (e: Exception) {
+            Log.e(TAG, "probeDuration failed for ${file.name}", e)
+            null
+        } finally {
+            retriever.release()
+        }
     }
 }
