@@ -421,9 +421,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (out != null) {
                         file.transcodeStatus = TranscodeStatus.DONE
                         transcodedFiles.add(file to out)
-                        MediaStoreHelper.addVideoToGallery(context, out)
+                        // Original full-size → Movies/GoProUnloader/
+                        MediaStoreHelper.addVideoToGallery(context, src)
+                        // Transcoded copy → Movies/GoProUnloader/transcoded/
+                        MediaStoreHelper.addVideoToGallery(context, out, "GoProUnloader/transcoded")
                     } else {
                         file.transcodeStatus = TranscodeStatus.SKIPPED
+                        // Transcode was skipped (already ≤1080p) — publish the original
+                        MediaStoreHelper.addVideoToGallery(context, src)
                     }
                     notifyListChanged()
                 }

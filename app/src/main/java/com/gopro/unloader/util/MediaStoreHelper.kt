@@ -21,21 +21,21 @@ private const val SUBFOLDER = "GoProUnloader"
  */
 object MediaStoreHelper {
 
-    fun addVideoToGallery(context: Context, file: File): Boolean {
+    fun addVideoToGallery(context: Context, file: File, subfolder: String = SUBFOLDER): Boolean {
         if (!file.exists()) return false
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            addViaMediaStore(context, file)
+            addViaMediaStore(context, file, subfolder)
         } else {
-            addLegacy(file)
+            addLegacy(file, subfolder)
         }
     }
 
-    private fun addViaMediaStore(context: Context, file: File): Boolean {
+    private fun addViaMediaStore(context: Context, file: File, subfolder: String): Boolean {
         val mimeType = if (file.name.uppercase().endsWith(".MP4")) "video/mp4" else "video/*"
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, file.name)
             put(MediaStore.Video.Media.MIME_TYPE, mimeType)
-            put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/$SUBFOLDER")
+            put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/$subfolder")
             put(MediaStore.Video.Media.IS_PENDING, 1)
         }
 
@@ -61,10 +61,10 @@ object MediaStoreHelper {
         }
     }
 
-    private fun addLegacy(file: File): Boolean {
+    private fun addLegacy(file: File, subfolder: String): Boolean {
         return try {
             val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
-            val destDir = File(moviesDir, SUBFOLDER).also { it.mkdirs() }
+            val destDir = File(moviesDir, subfolder).also { it.mkdirs() }
             file.copyTo(File(destDir, file.name), overwrite = true)
             Log.d(TAG, "Copied to public Movies: ${file.name}")
             true
