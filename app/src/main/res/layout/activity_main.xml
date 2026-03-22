@@ -51,265 +51,324 @@
                 android:visibility="gone"
                 android:layout_marginBottom="12dp" />
 
-            <!-- WiFi credentials card (shown after BLE) -->
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/card_wifi"
+            <!-- ========================================== -->
+            <!-- SECTION 1: CONNECT                         -->
+            <!-- ========================================== -->
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_wake_camera"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:visibility="gone"
-                app:cardElevation="2dp"
-                app:cardCornerRadius="8dp">
+                android:layout_marginBottom="4dp"
+                android:text="@string/btn_wake_camera"
+                app:icon="@android:drawable/stat_sys_data_bluetooth"
+                app:iconGravity="textStart" />
 
-                <LinearLayout
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/hint_wake_camera"
+                android:textAppearance="?attr/textAppearanceBodySmall"
+                android:textColor="?attr/colorOnSurfaceVariant"
+                android:layout_marginBottom="16dp"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp" />
+
+            <!-- ========================================== -->
+            <!-- SECTIONS VISIBLE AFTER CAMERA WAKE         -->
+            <!-- ========================================== -->
+
+            <LinearLayout
+                android:id="@+id/layout_connected"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <!-- ====================================== -->
+                <!-- SECTION 2: CAMERA STATUS               -->
+                <!-- ====================================== -->
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/card_camera_info"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="12dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="GoPro WiFi Credentials"
-                        android:textAppearance="?attr/textAppearanceTitleSmall"
-                        android:paddingBottom="8dp" />
+                    android:layout_marginBottom="12dp"
+                    app:cardElevation="2dp"
+                    app:cardCornerRadius="8dp">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="horizontal">
+                        android:orientation="vertical"
+                        android:padding="12dp">
 
                         <TextView
-                            android:layout_width="64dp"
+                            android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="SSID:"
-                            android:textStyle="bold" />
+                            android:text="@string/section_camera_status"
+                            android:textAppearance="?attr/textAppearanceTitleSmall"
+                            android:paddingBottom="8dp" />
+
+                        <!-- Battery row -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:paddingBottom="6dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Battery"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tv_battery_level"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="\u2014" />
+
+                        </LinearLayout>
 
                         <TextView
-                            android:id="@+id/tv_wifi_ssid"
-                            android:layout_width="0dp"
+                            android:id="@+id/tv_battery_estimate"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="—"
-                            android:textIsSelectable="true" />
+                            android:textAppearance="?attr/textAppearanceBodySmall"
+                            android:textColor="?attr/colorOnSurfaceVariant"
+                            android:paddingBottom="10dp" />
+
+                        <!-- Storage row -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:paddingBottom="6dp">
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="SD Card Free"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tv_storage_free"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="\u2014" />
+
+                        </LinearLayout>
+
+                        <TextView
+                            android:id="@+id/tv_storage_estimate"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:textAppearance="?attr/textAppearanceBodySmall"
+                            android:textColor="?attr/colorOnSurfaceVariant" />
+
                     </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- ====================================== -->
+                <!-- SECTION 3: CAMERA CONTROLS             -->
+                <!-- ====================================== -->
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/card_recording"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    app:cardElevation="2dp"
+                    app:cardCornerRadius="8dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:padding="12dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/section_recording"
+                            android:textAppearance="?attr/textAppearanceTitleSmall"
+                            android:paddingBottom="8dp" />
+
+                        <TextView
+                            android:id="@+id/tv_recording_status"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:textAppearance="?attr/textAppearanceBodySmall"
+                            android:paddingBottom="10dp"
+                            android:text="@string/recording_status_unknown" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal">
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btn_start_recording"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:layout_marginEnd="8dp"
+                                android:text="@string/btn_start_recording" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btn_stop_recording"
+                                style="@style/Widget.Material3.Button.OutlinedButton"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="@string/btn_stop_recording" />
+
+                        </LinearLayout>
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/hint_ble_controls"
+                            android:textAppearance="?attr/textAppearanceBodySmall"
+                            android:textColor="?attr/colorOnSurfaceVariant"
+                            android:paddingTop="6dp" />
+
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- ====================================== -->
+                <!-- SECTION 4: FILES (WiFi)                -->
+                <!-- ====================================== -->
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/section_files"
+                    android:textAppearance="?attr/textAppearanceTitleSmall"
+                    android:paddingBottom="8dp"
+                    android:paddingTop="4dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_browse_files"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="4dp"
+                    android:text="@string/btn_browse_files" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/hint_wifi_files"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    android:layout_marginBottom="12dp"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp" />
+
+                <!-- File list header -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingBottom="4dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Media Files"
+                        android:textAppearance="?attr/textAppearanceLabelLarge" />
+
+                    <TextView
+                        android:id="@+id/tv_file_count"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textAppearance="?attr/textAppearanceBodySmall" />
+
+                </LinearLayout>
+
+                <!-- File list -->
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/recycler_view"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:nestedScrollingEnabled="false" />
+
+                <!-- Selection + transfer controls (shown once list is loaded) -->
+                <LinearLayout
+                    android:id="@+id/layout_transfer_controls"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginTop="12dp"
+                    android:visibility="gone">
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
-                        android:layout_marginTop="4dp">
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="8dp">
 
                         <TextView
-                            android:layout_width="64dp"
-                            android:layout_height="wrap_content"
-                            android:text="Pass:"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/tv_wifi_password"
+                            android:id="@+id/tv_selected_count"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:fontFamily="monospace"
-                            android:text="—"
-                            android:textIsSelectable="true" />
+                            android:textAppearance="?attr/textAppearanceBodySmall" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_select_all"
+                            style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/btn_select_all" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_deselect_all"
+                            style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/btn_deselect_all" />
+
                     </LinearLayout>
 
                     <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_copy_password"
-                        style="@style/Widget.Material3.Button.TextButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_gravity="end"
-                        android:text="Copy Password" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <!-- Quick Connect button -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_quick_connect"
-                style="@style/Widget.Material3.Button.OutlinedButton"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="8dp"
-                android:text="@string/btn_quick_connect" />
-
-            <!-- Camera stats card (shown after Quick Connect) -->
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/card_camera_info"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:visibility="gone"
-                app:cardElevation="2dp"
-                app:cardCornerRadius="8dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="12dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Camera Stats"
-                        android:textAppearance="?attr/textAppearanceTitleSmall"
-                        android:paddingBottom="8dp" />
-
-                    <!-- Battery row -->
-                    <LinearLayout
+                        android:id="@+id/btn_transfer_selected"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:paddingBottom="6dp">
+                        android:text="@string/btn_transfer_selected" />
 
-                        <TextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="Battery"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/tv_battery_level"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="—" />
-
-                    </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/tv_battery_estimate"
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_delete_from_gopro"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:textAppearance="?attr/textAppearanceBodySmall"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:paddingBottom="10dp" />
-
-                    <!-- Storage row -->
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:paddingBottom="6dp">
-
-                        <TextView
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="SD Card Free"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/tv_storage_free"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="—" />
-
-                    </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/tv_storage_estimate"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:textAppearance="?attr/textAppearanceBodySmall"
-                        android:textColor="?attr/colorOnSurfaceVariant" />
+                        android:layout_marginTop="8dp"
+                        android:text="@string/btn_delete_from_gopro" />
 
                 </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <!-- Recording control card -->
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/card_recording"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                app:cardElevation="2dp"
-                app:cardCornerRadius="8dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="12dp">
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/card_recording_title"
-                        android:textAppearance="?attr/textAppearanceTitleSmall"
-                        android:paddingBottom="8dp" />
-
-                    <TextView
-                        android:id="@+id/tv_recording_status"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:textAppearance="?attr/textAppearanceBodySmall"
-                        android:paddingBottom="10dp"
-                        android:text="@string/recording_status_unknown" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal">
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btn_start_recording"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:layout_marginEnd="8dp"
-                            android:text="@string/btn_start_recording" />
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btn_stop_recording"
-                            style="@style/Widget.Material3.Button.OutlinedButton"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="@string/btn_stop_recording" />
-
-                    </LinearLayout>
-
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <!-- Scan / List buttons -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginBottom="12dp">
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_start_offload"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginEnd="8dp"
-                    android:text="@string/btn_scan_gopro" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_list_files"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/btn_list_files" />
 
             </LinearLayout>
 
-            <!-- Status log -->
+            <!-- ========================================== -->
+            <!-- ACTIVITY LOG                               -->
+            <!-- ========================================== -->
+
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Log"
+                android:text="@string/section_log"
                 android:textAppearance="?attr/textAppearanceLabelLarge"
-                android:paddingBottom="4dp" />
+                android:paddingBottom="4dp"
+                android:layout_marginTop="16dp" />
 
             <ScrollView
                 android:id="@+id/scroll_view_log"
@@ -326,92 +385,6 @@
                     android:textSize="12sp"
                     android:textIsSelectable="true" />
             </ScrollView>
-
-            <!-- File list header -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:layout_marginTop="16dp"
-                android:paddingBottom="4dp">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Media Files"
-                    android:textAppearance="?attr/textAppearanceLabelLarge" />
-
-                <TextView
-                    android:id="@+id/tv_file_count"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textAppearance="?attr/textAppearanceBodySmall" />
-
-            </LinearLayout>
-
-            <!-- File list -->
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/recycler_view"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:nestedScrollingEnabled="false" />
-
-            <!-- Selection + transfer controls (shown once list is loaded) -->
-            <LinearLayout
-                android:id="@+id/layout_transfer_controls"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:layout_marginTop="12dp"
-                android:visibility="gone">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginBottom="8dp">
-
-                    <TextView
-                        android:id="@+id/tv_selected_count"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:textAppearance="?attr/textAppearanceBodySmall" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_select_all"
-                        style="@style/Widget.Material3.Button.TextButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/btn_select_all" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_deselect_all"
-                        style="@style/Widget.Material3.Button.TextButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/btn_deselect_all" />
-
-                </LinearLayout>
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_transfer_selected"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="@string/btn_transfer_selected" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btn_delete_from_gopro"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="@string/btn_delete_from_gopro" />
-
-            </LinearLayout>
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>

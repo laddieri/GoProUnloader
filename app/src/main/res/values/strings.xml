@@ -1,18 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">GoPro Unloader</string>
-    <string name="btn_start_offload">Start Offload</string>
-    <string name="btn_scan_gopro">Scan GoPro</string>
-    <string name="btn_list_files">List Files (WiFi)</string>
+
+    <!-- Buttons -->
+    <string name="btn_wake_camera">Wake Camera</string>
+    <string name="btn_browse_files">Browse &amp; Transfer Files</string>
     <string name="btn_transfer_selected">Transfer Selected</string>
     <string name="btn_delete_from_gopro">Delete from GoPro</string>
-    <string name="btn_quick_connect">Quick Connect (Battery &amp; Storage)</string>
     <string name="btn_select_all">Select All</string>
     <string name="btn_deselect_all">Deselect All</string>
-    <string name="card_recording_title">Camera Recording</string>
     <string name="btn_start_recording">Start Recording</string>
     <string name="btn_stop_recording">Stop Recording</string>
-    <string name="recording_status_unknown">Status: unknown — tap Start Recording to begin</string>
-    <string name="recording_status_active">● Recording</string>
-    <string name="recording_status_stopped">■ Stopped</string>
+
+    <!-- Section headers -->
+    <string name="section_camera_status">Camera Status</string>
+    <string name="section_recording">Recording Control</string>
+    <string name="section_files">Files &amp; Transfers</string>
+    <string name="section_log">Activity Log</string>
+
+    <!-- Recording status -->
+    <string name="recording_status_unknown">Status: unknown</string>
+    <string name="recording_status_active">\u25CF Recording</string>
+    <string name="recording_status_stopped">\u25A0 Stopped</string>
+
+    <!-- Hints -->
+    <string name="hint_wake_camera">Uses Bluetooth to wake the camera and check battery and storage</string>
+    <string name="hint_ble_controls">Uses Bluetooth \u2014 no WiFi needed</string>
+    <string name="hint_wifi_files">Connects to GoPro WiFi automatically to list and transfer files</string>
 </resources>

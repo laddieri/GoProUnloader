@@ -44,6 +44,9 @@ class GoProBleManager(private val context: Context) {
         // 0x13 = Get Status Value; 0x02 = battery %, 0x36 (54) = SD remaining KB
         val STATUS_QUERY_CMD = byteArrayOf(0x03, 0x13, 0x02, 0x36.toByte())
 
+        val SHUTTER_START_CMD = byteArrayOf(0x03, 0x01, 0x01, 0x01)
+        val SHUTTER_STOP_CMD = byteArrayOf(0x03, 0x01, 0x01, 0x00)
+
         const val SCAN_TIMEOUT_MS = 15_000L
         const val CONNECT_TIMEOUT_MS = 20_000L
         const val RESPONSE_TIMEOUT_MS = 5_000L
@@ -53,6 +56,10 @@ class GoProBleManager(private val context: Context) {
         context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter = bluetoothManager.adapter
     private var gatt: BluetoothGatt? = null
+
+    /** Address of the last GoPro found during a BLE scan. Persists after close(). */
+    var lastFoundAddress: String? = null
+        private set
 
     /** Scan for a GoPro, connect, read WiFi credentials, and enable the WiFi AP. */
     suspend fun findAndEnableWifi(
@@ -94,6 +101,7 @@ class GoProBleManager(private val context: Context) {
                             if (name.startsWith("GoPro") && cont.isActive) {
                                 scanner.stopScan(this)
                                 foundDevice = result.device
+                                lastFoundAddress = result.device.address
                                 cont.resume(result.device)
                             }
                         }
@@ -414,6 +422,112 @@ class GoProBleManager(private val context: Context) {
             remainingSpaceMb = if (spaceKb >= 0) spaceKb / 1024L else -1L,
             remainingVideoSec = -1L
         )
+    }
+
+    /**
+     * Sends an arbitrary command to the GoPro via BLE CMD_REQ and waits for the
+     * response on CMD_RSP. Returns true if the camera acknowledges with success (0x00).
+     * Useful for shutter start/stop and other BLE commands.
+     */
+    suspend fun sendBleCommand(
+        cmd: ByteArray,
+        knownAddress: String? = null,
+        onStatus: (String) -> Unit = {}
+    ): Boolean = withContext(Dispatchers.IO) {
+        val device = if (knownAddress != null) {
+            onStatus("Connecting to $knownAddress…")
+            bluetoothAdapter.getRemoteDevice(knownAddress)
+        } else {
+            onStatus("Scanning for GoPro…")
+            scanForGoPro(onStatus)
+        }
+        if (device == null) {
+            onStatus("No GoPro found.")
+            return@withContext false
+        }
+        onStatus("Sending command to ${device.name ?: "GoPro"}…")
+        connectAndSendBleCommand(device, cmd, onStatus)
+    }
+
+    @Suppress("DEPRECATION")
+    private suspend fun connectAndSendBleCommand(
+        device: BluetoothDevice,
+        cmd: ByteArray,
+        onStatus: (String) -> Unit
+    ): Boolean = withContext(Dispatchers.IO) {
+        withTimeoutOrNull(CONNECT_TIMEOUT_MS) {
+            suspendCancellableCoroutine { cont ->
+                var cmdSent = false
+
+                val gattCallback = object : BluetoothGattCallback() {
+                    override fun onConnectionStateChange(
+                        gatt: BluetoothGatt, status: Int, newState: Int
+                    ) {
+                        when (newState) {
+                            BluetoothProfile.STATE_CONNECTED -> gatt.discoverServices()
+                            BluetoothProfile.STATE_DISCONNECTED -> {
+                                if (!cont.isCompleted) cont.resume(false)
+                            }
+                        }
+                    }
+
+                    override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+                        if (status != BluetoothGatt.GATT_SUCCESS) {
+                            if (!cont.isCompleted) cont.resume(false)
+                            return
+                        }
+                        val cmdRsp = gatt.findCharacteristic(CMD_RSP_UUID) ?: run {
+                            if (!cont.isCompleted) cont.resume(false); return
+                        }
+                        gatt.setCharacteristicNotification(cmdRsp, true)
+                        val descriptor = cmdRsp.getDescriptor(NOTIFY_DESCRIPTOR_UUID)
+                        if (descriptor != null) {
+                            descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                            gatt.writeDescriptor(descriptor)
+                        } else {
+                            cmdSent = true
+                            writeCmdReq(gatt, cmd)
+                        }
+                    }
+
+                    override fun onDescriptorWrite(
+                        gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int
+                    ) {
+                        if (descriptor.uuid == NOTIFY_DESCRIPTOR_UUID && !cmdSent) {
+                            cmdSent = true
+                            writeCmdReq(gatt, cmd)
+                        }
+                    }
+
+                    override fun onCharacteristicChanged(
+                        gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic
+                    ) {
+                        if (characteristic.uuid == CMD_RSP_UUID) {
+                            val data = characteristic.value ?: return
+                            Log.d(TAG, "Cmd response: ${data.joinToString { "0x%02x".format(it) }}")
+                            val success = data.size >= 3 && data[2] == 0x00.toByte()
+                            gatt.disconnect()
+                            if (!cont.isCompleted) cont.resume(success)
+                        }
+                    }
+                }
+
+                val g = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+                this@GoProBleManager.gatt = g
+                cont.invokeOnCancellation {
+                    g.disconnect()
+                    g.close()
+                }
+            }
+        } ?: false
+    }
+
+    @Suppress("DEPRECATION")
+    private fun writeCmdReq(gatt: BluetoothGatt, cmd: ByteArray) {
+        val cmdChar = gatt.findCharacteristic(CMD_REQ_UUID) ?: return
+        cmdChar.value = cmd
+        cmdChar.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        gatt.writeCharacteristic(cmdChar)
     }
 
     fun close() {

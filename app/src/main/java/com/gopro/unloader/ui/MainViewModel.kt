@@ -36,9 +36,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _mediaFiles = MutableLiveData<List<MediaFile>>()
     val mediaFiles: LiveData<List<MediaFile>> = _mediaFiles
 
-    private val _wifiCredentials = MutableLiveData<WifiCredentials?>()
-    val wifiCredentials: LiveData<WifiCredentials?> = _wifiCredentials
-
     private val _isBusy = MutableLiveData(false)
     val isBusy: LiveData<Boolean> = _isBusy
 
@@ -51,8 +48,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isRecording = MutableLiveData<Boolean?>(null)
     val isRecording: LiveData<Boolean?> = _isRecording
 
+    private val _isConnected = MutableLiveData(false)
+    val isConnected: LiveData<Boolean> = _isConnected
+
     // ----------------------------------------------------------- settings
-    var skipBle: Boolean = false
     var keepOriginals: Boolean = false
     var bleAddress: String? = null
 
@@ -64,6 +63,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var wifiConnector: WifiConnector? = null
 
     private val context: Context get() = getApplication()
+
+    /** Stored WiFi credentials from last BLE wake — used for automatic WiFi connection. */
+    private var storedWifiCredentials: WifiCredentials? = null
+
+    /** BLE address discovered during last scan — skip re-scanning for subsequent operations. */
+    private var lastKnownBleAddress: String? = null
 
     private val outputDir: File
         get() {
@@ -80,117 +85,72 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         STARTING_RECORDING, STOPPING_RECORDING, DELETING
     }
 
-    // --------------------------------------------------------------- actions
+    // ===================================================================
+    // WAKE CAMERA (BLE only — no WiFi)
+    // Queries battery/storage, then enables the WiFi AP for later use.
+    // ===================================================================
 
-    /**
-     * Phase 1: BLE scan → WiFi connect → fetch and display the file list.
-     * Stops at LIST_READY so the user can review and select files before transferring.
-     */
-    fun scanAndList() {
+    fun wakeCamera() {
         if (_isBusy.value == true) return
         _isBusy.value = true
         _statusLog.value = ""
-        _mediaFiles.value = emptyList()
-
-        viewModelScope.launch {
-            try {
-                if (!skipBle) {
-                    _phase.value = Phase.BLE_SCAN
-                    log("Starting BLE scan…")
-                    val bleManager = GoProBleManager(context).also { bleMgr = it }
-                    val creds = bleManager.findAndEnableWifi(knownAddress = bleAddress) { msg -> log(msg) }
-                    if (creds == null) {
-                        log("BLE failed. Connect to GoPro WiFi manually, then use 'List Files (WiFi)'.")
-                        return@launch
-                    }
-                    _wifiCredentials.postValue(creds)
-                    _phase.value = Phase.WIFI_WAIT
-                    if (!connectWifi(creds)) return@launch
-                } else {
-                    log("Skipping BLE. Checking WiFi connection…")
-                    _phase.value = Phase.WIFI_WAIT
-                    if (!waitForCameraConnection()) return@launch
-                }
-
-                _phase.value = Phase.FETCHING_LIST
-                val files = fetchAndShowList()
-                if (files.isEmpty()) {
-                    log("No media files found on GoPro.")
-                    return@launch
-                }
-                _phase.value = Phase.LIST_READY
-                log("Select the files you want to transfer, then tap Transfer Selected.")
-            } finally {
-                _isBusy.value = false
-                bleMgr?.close()
-                bleMgr = null
-            }
-        }
-    }
-
-    /** Fetch and display the file list without BLE (assumes WiFi already connected).  */
-    fun listFiles() {
-        if (_isBusy.value == true) return
-        _isBusy.value = true
-        _statusLog.value = ""
-        _mediaFiles.value = emptyList()
-
-        viewModelScope.launch {
-            try {
-                _phase.value = Phase.WIFI_WAIT
-                if (!waitForCameraConnection()) return@launch
-                _phase.value = Phase.FETCHING_LIST
-                val files = fetchAndShowList()
-                if (files.isEmpty()) {
-                    log("No media files found on GoPro.")
-                    return@launch
-                }
-                _phase.value = Phase.LIST_READY
-                log("Select the files you want to transfer, then tap Transfer Selected.")
-            } finally {
-                _isBusy.value = false
-                _phase.value = if (_phase.value == Phase.FETCHING_LIST) Phase.IDLE else _phase.value
-            }
-        }
-    }
-
-    /**
-     * Quick check: connects to the GoPro over Bluetooth LE (no WiFi, no file transfer),
-     * reads battery % and SD card free space via the BLE Query API, and posts to [cameraInfo].
-     */
-    fun quickConnect() {
-        if (_isBusy.value == true) return
-        _isBusy.value = true
         _cameraInfo.value = null
 
         viewModelScope.launch {
             try {
                 _phase.value = Phase.BLE_SCAN
-                log("Scanning for GoPro via Bluetooth…")
-                val bleManager = GoProBleManager(context).also { bleMgr = it }
-                val info = bleManager.queryCameraInfo(
+                log("Waking camera via Bluetooth…")
+
+                // Step 1: Query camera status (battery, storage) over BLE
+                val bleQuery = GoProBleManager(context).also { bleMgr = it }
+                val info = bleQuery.queryCameraInfo(
                     knownAddress = bleAddress,
                     onStatus = { log(it) }
                 )
-                if (info == null) {
-                    log("Could not read camera info over Bluetooth.")
-                    return@launch
+                lastKnownBleAddress = bleQuery.lastFoundAddress ?: bleAddress
+                bleQuery.close()
+                bleMgr = null
+
+                if (info != null) {
+                    _cameraInfo.postValue(info)
+                    log("Battery: ${info.batteryPercent}%  •  Storage: ${formatMb(info.remainingSpaceMb)} free")
                 }
-                _cameraInfo.postValue(info)
-                log("Camera stats retrieved.")
+
+                // Step 2: Enable WiFi AP and store credentials for later
+                log("Enabling WiFi AP…")
+                val bleWifi = GoProBleManager(context).also { bleMgr = it }
+                val creds = bleWifi.findAndEnableWifi(
+                    knownAddress = lastKnownBleAddress,
+                    onStatus = { log(it) }
+                )
+                bleWifi.close()
+                bleMgr = null
+
+                if (creds != null) {
+                    storedWifiCredentials = creds
+                    log("Camera is awake. WiFi AP ready for file transfers.")
+                } else if (info == null) {
+                    log("Could not connect to camera. Make sure it's nearby and powered on.")
+                    return@launch
+                } else {
+                    log("Status retrieved but WiFi AP could not be enabled. File transfers may not work.")
+                }
+
+                _isConnected.postValue(true)
                 _phase.value = Phase.IDLE
             } finally {
                 _isBusy.value = false
+                bleMgr?.close()
+                bleMgr = null
                 if (_phase.value == Phase.BLE_SCAN) _phase.value = Phase.IDLE
             }
         }
     }
 
-    /**
-     * Starts recording on the GoPro.
-     * If the camera is reachable via WiFi, sends the command directly.
-     * If not, wakes the camera via Bluetooth LE first, then waits for WiFi.
-     */
+    // ===================================================================
+    // RECORDING CONTROL (BLE only — no WiFi)
+    // ===================================================================
+
     fun startRecording() {
         if (_isBusy.value == true) return
         _isBusy.value = true
@@ -198,51 +158,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 _phase.value = Phase.STARTING_RECORDING
-                log("Checking camera connection…")
-
-                val reachable = withContext(Dispatchers.IO) { goProApi.isCameraReachable() }
-                if (!reachable) {
-                    // Camera not on WiFi — wake it via BLE
-                    _phase.value = Phase.BLE_SCAN
-                    log("Camera not reachable. Waking via Bluetooth LE…")
-                    val bleManager = GoProBleManager(context).also { bleMgr = it }
-                    val creds = bleManager.findAndEnableWifi(knownAddress = bleAddress) { msg -> log(msg) }
-                    if (creds == null) {
-                        log("BLE wake failed. Turn the camera on manually, then try again.")
-                        return@launch
-                    }
-                    _wifiCredentials.postValue(creds)
-                    _phase.value = Phase.WIFI_WAIT
-                    if (!connectWifi(creds)) {
-                        log("Cannot reach camera over WiFi. Connect to the GoPro network and try again.")
-                        return@launch
-                    }
-                }
-
-                _phase.value = Phase.STARTING_RECORDING
-                log("Sending start recording command…")
-                val ok = withContext(Dispatchers.IO) { goProApi.startRecording() }
+                log("Starting recording via Bluetooth…")
+                val ble = GoProBleManager(context).also { bleMgr = it }
+                val ok = ble.sendBleCommand(
+                    GoProBleManager.SHUTTER_START_CMD,
+                    knownAddress = lastKnownBleAddress ?: bleAddress,
+                    onStatus = { log(it) }
+                )
                 if (ok) {
                     _isRecording.postValue(true)
                     log("Recording started.")
                 } else {
-                    log("Failed to start recording. Check the camera mode and try again.")
+                    log("Failed to start recording. Make sure the camera is awake.")
                 }
                 _phase.value = Phase.IDLE
             } finally {
                 _isBusy.value = false
                 bleMgr?.close()
                 bleMgr = null
-                wifiConnector?.disconnect()
-                wifiConnector = null
             }
         }
     }
 
-    /**
-     * Stops recording on the GoPro.
-     * The camera must already be reachable over WiFi.
-     */
     fun stopRecording() {
         if (_isBusy.value == true) return
         _isBusy.value = true
@@ -250,25 +187,82 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 _phase.value = Phase.STOPPING_RECORDING
-                log("Sending stop recording command…")
-                val ok = withContext(Dispatchers.IO) { goProApi.stopRecording() }
+                log("Stopping recording via Bluetooth…")
+                val ble = GoProBleManager(context).also { bleMgr = it }
+                val ok = ble.sendBleCommand(
+                    GoProBleManager.SHUTTER_STOP_CMD,
+                    knownAddress = lastKnownBleAddress ?: bleAddress,
+                    onStatus = { log(it) }
+                )
                 if (ok) {
                     _isRecording.postValue(false)
                     log("Recording stopped.")
                 } else {
-                    log("Failed to stop recording. Is the camera reachable on the GoPro WiFi network?")
+                    log("Failed to stop recording.")
                 }
                 _phase.value = Phase.IDLE
             } finally {
                 _isBusy.value = false
+                bleMgr?.close()
+                bleMgr = null
             }
         }
     }
 
-    /**
-     * Phase 2: Download + optionally transcode + optionally delete from camera.
-     * Only transfers files that have [MediaFile.selected] == true.
-     */
+    // ===================================================================
+    // BROWSE FILES (WiFi — auto-connects using stored BLE credentials)
+    // ===================================================================
+
+    fun browseFiles() {
+        if (_isBusy.value == true) return
+        _isBusy.value = true
+        _mediaFiles.value = emptyList()
+
+        viewModelScope.launch {
+            try {
+                // If no stored credentials, wake camera via BLE first
+                if (storedWifiCredentials == null) {
+                    _phase.value = Phase.BLE_SCAN
+                    log("No WiFi credentials cached. Waking camera via Bluetooth…")
+                    val ble = GoProBleManager(context).also { bleMgr = it }
+                    val creds = ble.findAndEnableWifi(
+                        knownAddress = lastKnownBleAddress ?: bleAddress,
+                        onStatus = { log(it) }
+                    )
+                    lastKnownBleAddress = ble.lastFoundAddress ?: lastKnownBleAddress
+                    ble.close()
+                    bleMgr = null
+                    if (creds == null) {
+                        log("Cannot connect to camera. Wake the camera first and try again.")
+                        return@launch
+                    }
+                    storedWifiCredentials = creds
+                }
+
+                _phase.value = Phase.WIFI_WAIT
+                if (!connectWifi(storedWifiCredentials!!)) return@launch
+
+                _phase.value = Phase.FETCHING_LIST
+                val files = fetchAndShowList()
+                if (files.isEmpty()) {
+                    log("No media files found on the camera.")
+                    return@launch
+                }
+                _phase.value = Phase.LIST_READY
+                log("Select the files you want to transfer.")
+            } finally {
+                _isBusy.value = false
+                bleMgr?.close()
+                bleMgr = null
+                if (_phase.value == Phase.FETCHING_LIST) _phase.value = Phase.IDLE
+            }
+        }
+    }
+
+    // ===================================================================
+    // TRANSFER (WiFi — download + optional transcode + optional delete)
+    // ===================================================================
+
     fun startTransfer(transcode: Boolean, deleteFromCamera: Boolean) {
         val filesToTransfer = _mediaFiles.value?.filter { it.selected } ?: emptyList()
         if (filesToTransfer.isEmpty()) {
@@ -287,9 +281,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Delete selected files from the GoPro camera without downloading them.
-     */
     fun deleteSelectedFiles() {
         val filesToDelete = _mediaFiles.value?.filter { it.selected } ?: emptyList()
         if (filesToDelete.isEmpty()) {
@@ -317,7 +308,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 log("─────────────────────────")
                 log("Done! Deleted: $deleted  Errors: $failed")
-                // Refresh the file list so deleted files no longer appear
                 _phase.value = Phase.FETCHING_LIST
                 val files = fetchAndShowList()
                 _phase.value = if (files.isEmpty()) Phase.IDLE else Phase.LIST_READY
@@ -429,14 +419,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val errCount = files.count { it.downloadStatus == DownloadStatus.ERROR }
         log("─────────────────────────")
         log("Done! Transferred: $dlCount  Errors: $errCount")
-        log("Files saved to Movies/GoProUnloader")
+        log("Files saved to Movies/GoProUnloader (visible in file browser)")
         _phase.value = Phase.DONE
     }
 
-    /**
-     * Attempt programmatic WiFi connection, falling back to manual if it fails.
-     * Returns true once the camera HTTP API is reachable.
-     */
     private suspend fun connectWifi(creds: WifiCredentials): Boolean {
         log("Connecting to GoPro WiFi (${creds.ssid})…")
         val connector = WifiConnector(context).also { wifiConnector = it }
@@ -449,7 +435,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             is WifiConnectResult.Failed -> {
                 log("Auto-connect failed: ${result.reason}")
                 log("Please connect to \"${creds.ssid}\" manually (password: ${creds.password}).")
-                // Clean up the failed connector so manual connect can work
                 connector.disconnect()
                 wifiConnector = null
             }
@@ -458,7 +443,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return waitForCameraConnection()
     }
 
-    /** Release the programmatic WiFi binding. Safe to call even if never connected. */
     fun disconnectWifi() {
         wifiConnector?.disconnect()
         wifiConnector = null
@@ -469,8 +453,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         while (attempts < 30) {
             val reachable = withContext(Dispatchers.IO) { goProApi.isCameraReachable() }
             if (reachable) {
-                val battery = withContext(Dispatchers.IO) { goProApi.getBatteryLevel() }
-                log("GoPro connected. Battery: ${battery ?: "?"}%")
+                log("GoPro connected over WiFi.")
                 return true
             }
             attempts++
@@ -496,5 +479,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun notifyListChanged() {
         _mediaFiles.postValue(_mediaFiles.value)
+    }
+
+    private fun formatMb(mb: Long): String = when {
+        mb >= 1024 -> "%.1f GB".format(mb / 1024.0)
+        else -> "$mb MB"
     }
 }

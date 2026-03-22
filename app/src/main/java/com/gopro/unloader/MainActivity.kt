@@ -3,19 +3,14 @@ package com.gopro.unloader
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
-import android.widget.CheckBox
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -42,7 +37,7 @@ class MainActivity : AppCompatActivity() {
         if (allGranted) {
             pendingAction?.invoke()
         } else {
-            Toast.makeText(this, "Permissions required for BLE scan.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Bluetooth permissions are required.", Toast.LENGTH_LONG).show()
         }
         pendingAction = null
     }
@@ -106,21 +101,6 @@ class MainActivity : AppCompatActivity() {
             updateSelectionCount()
         }
 
-        viewModel.wifiCredentials.observe(this) { creds ->
-            if (creds != null) {
-                binding.cardWifi.visibility = View.VISIBLE
-                binding.tvWifiSsid.text = creds.ssid
-                binding.tvWifiPassword.text = creds.password
-                binding.btnCopyPassword.setOnClickListener {
-                    val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-                    clipboard.setPrimaryClip(ClipData.newPlainText("GoPro WiFi", creds.password))
-                    Toast.makeText(this, "Password copied!", Toast.LENGTH_SHORT).show()
-                }
-            } else {
-                binding.cardWifi.visibility = View.GONE
-            }
-        }
-
         viewModel.isRecording.observe(this) { recording ->
             binding.tvRecordingStatus.text = when (recording) {
                 true -> getString(R.string.recording_status_active)
@@ -129,9 +109,13 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        viewModel.isConnected.observe(this) { connected ->
+            binding.layoutConnected.visibility = if (connected) View.VISIBLE else View.GONE
+        }
+
         viewModel.isBusy.observe(this) { busy ->
-            binding.btnStartOffload.isEnabled = !busy
-            binding.btnListFiles.isEnabled = !busy
+            binding.btnWakeCamera.isEnabled = !busy
+            binding.btnBrowseFiles.isEnabled = !busy
             binding.btnStartRecording.isEnabled = !busy
             binding.btnStopRecording.isEnabled = !busy
             binding.btnDeleteFromGopro.isEnabled = !busy
@@ -151,18 +135,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         viewModel.cameraInfo.observe(this) { info ->
-            if (info == null) {
-                binding.cardCameraInfo.visibility = View.GONE
-                return@observe
-            }
-            binding.cardCameraInfo.visibility = View.VISIBLE
+            if (info == null) return@observe
 
             // Battery
             if (info.batteryPercent >= 0) {
                 binding.tvBatteryLevel.text = "${info.batteryPercent}%"
                 val battMin = info.estimatedBatteryVideoSec / 60
                 binding.tvBatteryEstimate.text =
-                    "≈ $battMin min of recording remaining (estimated at 1080p)"
+                    "\u2248 $battMin min of recording remaining"
             } else {
                 binding.tvBatteryLevel.text = "Unknown"
                 binding.tvBatteryEstimate.text = ""
@@ -172,8 +152,8 @@ class MainActivity : AppCompatActivity() {
             if (info.remainingSpaceMb >= 0) {
                 binding.tvStorageFree.text = formatMb(info.remainingSpaceMb)
                 val storMin = info.storageVideoSec / 60
-                val source = if (info.remainingVideoSec >= 0) "camera-reported" else "estimated at 1080p ~60 Mbps"
-                binding.tvStorageEstimate.text = "≈ $storMin min of video ($source)"
+                val source = if (info.remainingVideoSec >= 0) "camera-reported" else "estimated"
+                binding.tvStorageEstimate.text = "\u2248 $storMin min of video ($source)"
             } else {
                 binding.tvStorageFree.text = "Unknown"
                 binding.tvStorageEstimate.text = ""
@@ -182,16 +162,16 @@ class MainActivity : AppCompatActivity() {
 
         viewModel.phase.observe(this) { phase ->
             binding.tvPhase.text = when (phase) {
-                MainViewModel.Phase.BLE_SCAN -> "Scanning via Bluetooth LE…"
-                MainViewModel.Phase.WIFI_WAIT -> "Waiting for WiFi connection…"
-                MainViewModel.Phase.FETCHING_LIST -> "Fetching media list…"
-                MainViewModel.Phase.LIST_READY -> "Ready — select files to transfer"
-                MainViewModel.Phase.DOWNLOADING -> "Downloading…"
-                MainViewModel.Phase.TRANSCODING -> "Transcoding to 1080p…"
+                MainViewModel.Phase.BLE_SCAN -> "Connecting via Bluetooth\u2026"
+                MainViewModel.Phase.WIFI_WAIT -> "Connecting to GoPro WiFi\u2026"
+                MainViewModel.Phase.FETCHING_LIST -> "Fetching media list\u2026"
+                MainViewModel.Phase.LIST_READY -> "Ready \u2014 select files to transfer"
+                MainViewModel.Phase.DOWNLOADING -> "Downloading\u2026"
+                MainViewModel.Phase.TRANSCODING -> "Transcoding to 1080p\u2026"
                 MainViewModel.Phase.DONE -> "Complete!"
-                MainViewModel.Phase.STARTING_RECORDING -> "Starting recording…"
-                MainViewModel.Phase.STOPPING_RECORDING -> "Stopping recording…"
-                MainViewModel.Phase.DELETING -> "Deleting from GoPro…"
+                MainViewModel.Phase.STARTING_RECORDING -> "Starting recording\u2026"
+                MainViewModel.Phase.STOPPING_RECORDING -> "Stopping recording\u2026"
+                MainViewModel.Phase.DELETING -> "Deleting from GoPro\u2026"
                 MainViewModel.Phase.IDLE -> ""
             }
 
@@ -209,8 +189,8 @@ class MainActivity : AppCompatActivity() {
     // =========================================================== buttons
 
     private fun setupButtons() {
-        binding.btnQuickConnect.setOnClickListener {
-            viewModel.quickConnect()
+        binding.btnWakeCamera.setOnClickListener {
+            withPermissionsAndBluetooth { viewModel.wakeCamera() }
         }
 
         binding.btnStartRecording.setOnClickListener {
@@ -218,15 +198,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnStopRecording.setOnClickListener {
-            viewModel.stopRecording()
+            withPermissionsAndBluetooth { viewModel.stopRecording() }
         }
 
-        binding.btnStartOffload.setOnClickListener {
-            withPermissionsAndBluetooth { viewModel.scanAndList() }
-        }
-
-        binding.btnListFiles.setOnClickListener {
-            viewModel.listFiles()
+        binding.btnBrowseFiles.setOnClickListener {
+            withPermissionsAndBluetooth { viewModel.browseFiles() }
         }
 
         binding.btnSelectAll.setOnClickListener {
@@ -269,8 +245,6 @@ class MainActivity : AppCompatActivity() {
     // =========================================================== transfer confirm dialog
 
     private fun showTransferConfirmDialog(selectedCount: Int) {
-        val dialogView = layoutInflater.inflate(android.R.layout.activity_list_item, null)
-
         var transcode = true
         var deleteFromCamera = true
 
@@ -299,7 +273,7 @@ class MainActivity : AppCompatActivity() {
     private fun showDeleteConfirmDialog(selectedCount: Int) {
         AlertDialog.Builder(this)
             .setTitle("Delete $selectedCount file(s) from GoPro?")
-            .setMessage("This will permanently delete the selected files from the camera's SD card without transferring them to your phone. This cannot be undone.")
+            .setMessage("This will permanently delete the selected files from the camera's SD card without transferring them. This cannot be undone.")
             .setPositiveButton("Delete") { _, _ ->
                 viewModel.deleteSelectedFiles()
             }
@@ -347,25 +321,18 @@ class MainActivity : AppCompatActivity() {
     // =========================================================== settings dialog
 
     private fun showSettingsDialog() {
-        val items = arrayOf(
-            "Skip BLE (WiFi already connected)",
-            "Keep originals after transcode"
-        )
-        val checked = booleanArrayOf(
-            viewModel.skipBle,
-            viewModel.keepOriginals
-        )
+        val items = arrayOf("Keep originals after transcode")
+        val checked = booleanArrayOf(viewModel.keepOriginals)
 
         AlertDialog.Builder(this)
-            .setTitle("Options")
+            .setTitle("Settings")
             .setMultiChoiceItems(items, checked) { _, which, isChecked ->
                 checked[which] = isChecked
             }
             .setPositiveButton("Apply") { _, _ ->
-                viewModel.skipBle = checked[0]
-                viewModel.keepOriginals = checked[1]
+                viewModel.keepOriginals = checked[0]
             }
-            .setNeutralButton("Set BLE Address") { _, _ ->
+            .setNeutralButton("BLE Address") { _, _ ->
                 showBleAddressDialog()
             }
             .setNegativeButton("Cancel", null)
