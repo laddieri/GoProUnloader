@@ -141,6 +141,7 @@ class GoProApi {
                         !name.uppercase().endsWith(".THM")
                     ) continue
 
+                    Log.d(TAG, "media entry keys for $name: ${f.keys().asSequence().toList()}, raw=$f")
                     val size = f.optLong("s", 0L)
                     val duration = f.optString("dur", "0").toLongOrNull() ?: 0L
                     val url = "$MEDIA_BASE_URL/$directory/$name"
