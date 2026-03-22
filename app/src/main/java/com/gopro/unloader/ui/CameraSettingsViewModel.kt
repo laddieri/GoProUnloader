@@ -7,6 +7,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import com.gopro.unloader.ble.GoProBleManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 class CameraSettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -17,11 +18,27 @@ class CameraSettingsViewModel(application: Application) : AndroidViewModel(appli
     private val _isBusy = MutableLiveData(false)
     val isBusy: LiveData<Boolean> = _isBusy
 
+    private val _currentSettings = MutableLiveData<Map<Int, Int>>(emptyMap())
+    val currentSettings: LiveData<Map<Int, Int>> = _currentSettings
+
     /** Populated by the launching Activity from MainViewModel's effective address. */
     var bleAddress: String? = null
 
     private val context: Context get() = getApplication()
     private var bleMgr: GoProBleManager? = null
+
+    fun loadCurrentSettings(settingIds: List<Int>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val ble = GoProBleManager(context)
+                val map = ble.querySettingValues(settingIds, knownAddress = bleAddress, onStatus = { log(it) })
+                ble.close()
+                _currentSettings.postValue(map)
+            } catch (_: Exception) {
+                // Non-fatal: UI just won't show current values
+            }
+        }
+    }
 
     fun applySetting(settingId: Int, value: Byte, settingName: String) {
         if (_isBusy.value == true) return
