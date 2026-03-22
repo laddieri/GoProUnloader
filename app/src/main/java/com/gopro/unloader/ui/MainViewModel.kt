@@ -22,6 +22,7 @@ import com.gopro.unloader.model.DownloadStatus
 import com.gopro.unloader.model.MediaFile
 import com.gopro.unloader.model.TranscodeStatus
 import com.gopro.unloader.util.MediaStoreHelper
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -61,8 +62,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _openWifiSettings = MutableLiveData(0)
     val openWifiSettings: LiveData<Int> = _openWifiSettings
 
+    /** Signal for the Activity to show post-transfer cleanup dialog. */
+    data class PostTransferPrompt(
+        val hasGoproFiles: Boolean,
+        val hasLocalOriginals: Boolean,
+        val id: Int = 0
+    )
+    data class PostTransferChoice(
+        val deleteFromGoPro: Boolean,
+        val deleteLocalOriginals: Boolean
+    )
+    private val _postTransferPrompt = MutableLiveData<PostTransferPrompt?>()
+    val postTransferPrompt: LiveData<PostTransferPrompt?> = _postTransferPrompt
+    private var postTransferDeferred: CompletableDeferred<PostTransferChoice>? = null
+
+    fun submitPostTransferChoice(choice: PostTransferChoice) {
+        postTransferDeferred?.complete(choice)
+    }
+
     // ----------------------------------------------------------- settings
-    var keepOriginals: Boolean = false
     var bleAddress: String? = null
 
     // --------------------------------------------------------------- helpers
@@ -273,7 +291,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // TRANSFER (WiFi — download + optional transcode + optional delete)
     // ===================================================================
 
-    fun startTransfer(transcode: Boolean, deleteFromCamera: Boolean) {
+    fun startTransfer(transcode: Boolean) {
         val filesToTransfer = _mediaFiles.value?.filter { it.selected } ?: emptyList()
         if (filesToTransfer.isEmpty()) {
             log("No files selected.")
@@ -284,7 +302,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             try {
-                runTransfer(filesToTransfer, transcode, deleteFromCamera)
+                runTransfer(filesToTransfer, transcode)
             } finally {
                 _isBusy.value = false
             }
@@ -332,8 +350,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun runTransfer(
         files: List<MediaFile>,
-        transcode: Boolean,
-        deleteFromCamera: Boolean
+        transcode: Boolean
     ) {
         _phase.value = Phase.DOWNLOADING
         log("Starting download of ${files.size} file(s)…")
@@ -378,13 +395,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             keepAliveJob.cancel()
         }
 
-        if (deleteFromCamera) {
-            log("Deleting ${downloaded.size} file(s) from camera…")
-            for ((file, _) in downloaded) {
-                val ok = withContext(Dispatchers.IO) { goProApi.deleteFile(file) }
-                log(if (ok) "  Deleted ${file.name} from GoPro." else "  Could not delete ${file.name}.")
-            }
-        }
+        val transcodedFiles = mutableListOf<Pair<MediaFile, File>>()
 
         if (transcode) {
             val mp4s = downloaded.filter { (f, _) -> f.name.uppercase().endsWith(".MP4") }
@@ -409,7 +420,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                     if (out != null) {
                         file.transcodeStatus = TranscodeStatus.DONE
-                        if (!keepOriginals) src.delete()
+                        transcodedFiles.add(file to out)
                         MediaStoreHelper.addVideoToGallery(context, out)
                     } else {
                         file.transcodeStatus = TranscodeStatus.SKIPPED
@@ -428,8 +439,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val dlCount = downloaded.size
         val errCount = files.count { it.downloadStatus == DownloadStatus.ERROR }
         log("─────────────────────────")
-        log("Done! Transferred: $dlCount  Errors: $errCount")
-        log("Files saved to Movies/GoProUnloader (visible in file browser)")
+        log("Transferred: $dlCount  Errors: $errCount")
+
+        // Ask user about cleanup after transfer/transcode
+        val hasGoproFiles = downloaded.isNotEmpty()
+        val hasLocalOriginals = transcode && transcodedFiles.isNotEmpty()
+
+        if (hasGoproFiles || hasLocalOriginals) {
+            val deferred = CompletableDeferred<PostTransferChoice>()
+            postTransferDeferred = deferred
+            _postTransferPrompt.postValue(PostTransferPrompt(
+                hasGoproFiles = hasGoproFiles,
+                hasLocalOriginals = hasLocalOriginals,
+                id = System.currentTimeMillis().toInt()
+            ))
+            val choice = deferred.await()
+            _postTransferPrompt.postValue(null)
+            postTransferDeferred = null
+
+            if (choice.deleteFromGoPro && hasGoproFiles) {
+                log("Deleting ${downloaded.size} file(s) from camera…")
+                for ((file, _) in downloaded) {
+                    val ok = withContext(Dispatchers.IO) { goProApi.deleteFile(file) }
+                    log(if (ok) "  Deleted ${file.name} from GoPro." else "  Could not delete ${file.name}.")
+                }
+            }
+
+            if (choice.deleteLocalOriginals && hasLocalOriginals) {
+                log("Removing full-size originals from phone…")
+                for ((file, _) in transcodedFiles) {
+                    val localFile = file.localPath?.let { File(it) }
+                    if (localFile != null && localFile.exists()) {
+                        localFile.delete()
+                        log("  Removed ${localFile.name}")
+                    }
+                }
+            }
+        }
+
+        log("Done! Files saved to Movies/GoProUnloader")
         _phase.value = Phase.DONE
     }
 
