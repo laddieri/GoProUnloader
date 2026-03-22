@@ -20,6 +20,7 @@ class GoProApi {
         const val MEDIA_LIST_URL = "$GOPRO_BASE/gopro/media/list"
         const val MEDIA_DELETE_URL = "$GOPRO_BASE/gopro/media/delete/file"
         const val MEDIA_BASE_URL = "$GOPRO_BASE/videos/DCIM"
+        const val MEDIA_INFO_URL = "$GOPRO_BASE/gopro/media/info"
         const val CAMERA_STATE_URL = "$GOPRO_BASE/gopro/camera/state"
         const val SHUTTER_START_URL = "$GOPRO_BASE/gopro/camera/shutter/start"
         const val SHUTTER_STOP_URL = "$GOPRO_BASE/gopro/camera/shutter/stop"
@@ -141,17 +142,34 @@ class GoProApi {
                         !name.uppercase().endsWith(".THM")
                     ) continue
 
-                    Log.d(TAG, "media entry keys for $name: ${f.keys().asSequence().toList()}, raw=$f")
                     val size = f.optLong("s", 0L)
-                    val duration = f.optString("dur", "0").toLongOrNull() ?: 0L
                     val url = "$MEDIA_BASE_URL/$directory/$name"
-                    files.add(MediaFile(name = name, directory = directory, size = size, url = url, duration = duration))
+                    files.add(MediaFile(name = name, directory = directory, size = size, url = url))
                 }
             }
             files
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching media list", e)
             emptyList()
+        }
+    }
+
+    /**
+     * Fetches duration (in seconds) for a single file via /gopro/media/info.
+     * Returns 0 if unavailable.
+     */
+    fun getMediaInfo(directory: String, name: String): Long {
+        return try {
+            val url = "$MEDIA_INFO_URL?path=$directory/$name"
+            val request = Request.Builder().url(url).build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return 0L
+                val json = JSONObject(response.body?.string() ?: return 0L)
+                json.optString("dur", "0").toLongOrNull() ?: 0L
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "getMediaInfo failed for $name", e)
+            0L
         }
     }
 

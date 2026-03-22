@@ -5,7 +5,7 @@ data class MediaFile(
     val directory: String,
     val size: Long,
     val url: String,
-    val duration: Long = 0L,          // seconds, parsed from GoPro "dur" field
+    var duration: Long = 0L,          // seconds, from /gopro/media/info
     var selected: Boolean = true,
     var downloadStatus: DownloadStatus = DownloadStatus.PENDING,
     var transcodeStatus: TranscodeStatus = TranscodeStatus.PENDING,

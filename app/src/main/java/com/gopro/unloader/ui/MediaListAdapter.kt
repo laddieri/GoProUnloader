@@ -129,6 +129,7 @@ class MediaListAdapter(
 
             override fun areContentsTheSame(oldItem: MediaFile, newItem: MediaFile) =
                 oldItem.selected == newItem.selected &&
+                    oldItem.duration == newItem.duration &&
                     oldItem.downloadStatus == newItem.downloadStatus &&
                     oldItem.transcodeStatus == newItem.transcodeStatus &&
                     oldItem.downloadProgress == newItem.downloadProgress &&

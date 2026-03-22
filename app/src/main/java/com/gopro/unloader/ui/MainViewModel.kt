@@ -583,6 +583,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val files = withContext(Dispatchers.IO) { goProApi.getMediaList() }
         _mediaFiles.postValue(files)
         log("Found ${files.size} file(s) on GoPro.")
+        viewModelScope.launch(Dispatchers.IO) {
+            files.filter { it.name.uppercase().endsWith(".MP4") }.forEach { file ->
+                val dur = goProApi.getMediaInfo(file.directory, file.name)
+                if (dur > 0) {
+                    file.duration = dur
+                    notifyListChanged()
+                }
+            }
+        }
         return files
     }
 
