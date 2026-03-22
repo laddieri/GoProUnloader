@@ -112,7 +112,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // -------------------------------------------------------------- enums
     enum class Phase {
         IDLE, BLE_SCAN, WIFI_WAIT, FETCHING_LIST, LIST_READY, DOWNLOADING, TRANSCODING, DONE,
-        STARTING_RECORDING, STOPPING_RECORDING, DELETING
+        STARTING_RECORDING, STOPPING_RECORDING, DELETING, SLEEPING, APPLYING_SETTING, LOADING_PRESET
     }
 
     // ===================================================================
@@ -230,6 +230,103 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     log("Failed to stop recording.")
                 }
+                _phase.value = Phase.IDLE
+            } finally {
+                _isBusy.value = false
+                bleMgr?.close()
+                bleMgr = null
+            }
+        }
+    }
+
+    // ===================================================================
+    // SLEEP CAMERA (BLE only)
+    // ===================================================================
+
+    fun sleepCamera() {
+        if (_isBusy.value == true) return
+        _isBusy.value = true
+
+        viewModelScope.launch {
+            try {
+                _phase.value = Phase.SLEEPING
+                log("Putting camera to sleep via Bluetooth…")
+                val ble = GoProBleManager(context).also { bleMgr = it }
+                val ok = ble.sendBleCommand(
+                    GoProBleManager.SLEEP_CMD,
+                    knownAddress = lastKnownBleAddress ?: bleAddress,
+                    onStatus = { log(it) }
+                )
+                ble.close()
+                bleMgr = null
+                if (ok) {
+                    log("Camera is sleeping.")
+                    _isConnected.postValue(false)
+                    storedWifiCredentials = null
+                } else {
+                    log("Sleep command failed. Camera may already be off or out of range.")
+                }
+                _phase.value = Phase.IDLE
+            } finally {
+                _isBusy.value = false
+                bleMgr?.close()
+                bleMgr = null
+            }
+        }
+    }
+
+    // ===================================================================
+    // CAMERA SETTINGS (BLE only)
+    // ===================================================================
+
+    fun applySetting(settingId: Int, value: Byte, settingName: String) {
+        if (_isBusy.value == true) return
+        _isBusy.value = true
+
+        viewModelScope.launch {
+            try {
+                _phase.value = Phase.APPLYING_SETTING
+                log("Applying setting "$settingName" via Bluetooth…")
+                val ble = GoProBleManager(context).also { bleMgr = it }
+                val ok = ble.sendSettingCommand(
+                    settingId = settingId,
+                    value = value,
+                    knownAddress = lastKnownBleAddress ?: bleAddress,
+                    onStatus = { log(it) }
+                )
+                ble.close()
+                bleMgr = null
+                log(if (ok) "Setting applied." else "Failed to apply setting.")
+                _phase.value = Phase.IDLE
+            } finally {
+                _isBusy.value = false
+                bleMgr?.close()
+                bleMgr = null
+            }
+        }
+    }
+
+    // ===================================================================
+    // RECORDING MODE (preset group switch via BLE command)
+    // ===================================================================
+
+    fun loadPresetGroup(cmd: ByteArray, name: String) {
+        if (_isBusy.value == true) return
+        _isBusy.value = true
+
+        viewModelScope.launch {
+            try {
+                _phase.value = Phase.LOADING_PRESET
+                log("Switching to $name mode…")
+                val ble = GoProBleManager(context).also { bleMgr = it }
+                val ok = ble.sendBleCommand(
+                    cmd,
+                    knownAddress = lastKnownBleAddress ?: bleAddress,
+                    onStatus = { log(it) }
+                )
+                ble.close()
+                bleMgr = null
+                log(if (ok) "Switched to $name mode." else "Failed to switch to $name mode.")
                 _phase.value = Phase.IDLE
             } finally {
                 _isBusy.value = false

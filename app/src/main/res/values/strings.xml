@@ -11,6 +11,8 @@
     <string name="btn_deselect_all">Deselect All</string>
     <string name="btn_start_recording">Start Recording</string>
     <string name="btn_stop_recording">Stop Recording</string>
+    <string name="btn_sleep_camera">Sleep Camera</string>
+    <string name="btn_camera_settings">Camera Settings</string>
 
     <!-- Section headers -->
     <string name="section_camera_status">Camera Status</string>

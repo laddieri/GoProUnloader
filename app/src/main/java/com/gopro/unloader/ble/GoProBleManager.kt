@@ -46,6 +46,16 @@ class GoProBleManager(private val context: Context) {
 
         val SHUTTER_START_CMD = byteArrayOf(0x03, 0x01, 0x01, 0x01)
         val SHUTTER_STOP_CMD = byteArrayOf(0x03, 0x01, 0x01, 0x00)
+        // 0x05 = sleep/power-down command
+        val SLEEP_CMD = byteArrayOf(0x01, 0x05)
+
+        val SETTINGS_REQ_UUID: UUID = UUID.fromString("b5f90074-aa8d-11e3-9046-0002a5d5c51b")
+        val SETTINGS_RSP_UUID: UUID = UUID.fromString("b5f90075-aa8d-11e3-9046-0002a5d5c51b")
+
+        // Load Preset Group: [len=4, cmd=0x40, param_len=2, group_high, group_low]
+        val PRESET_GROUP_VIDEO      = byteArrayOf(0x04, 0x40, 0x02, 0x03, 0xE8.toByte()) // 1000
+        val PRESET_GROUP_PHOTO      = byteArrayOf(0x04, 0x40, 0x02, 0x03, 0xE9.toByte()) // 1001
+        val PRESET_GROUP_TIMELAPSE  = byteArrayOf(0x04, 0x40, 0x02, 0x03, 0xEA.toByte()) // 1002
 
         const val SCAN_TIMEOUT_MS = 15_000L
         const val CONNECT_TIMEOUT_MS = 20_000L
@@ -527,6 +537,113 @@ class GoProBleManager(private val context: Context) {
         cmdChar.value = cmd
         cmdChar.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
         gatt.writeCharacteristic(cmdChar)
+    }
+
+    /**
+     * Applies a single camera setting via BLE. Uses the Settings Request/Response
+     * characteristics (GP-0074/GP-0075).
+     * Format sent: [0x03, setting_id, 0x01, value]
+     * Returns true if the camera acknowledges with status 0x00.
+     */
+    suspend fun sendSettingCommand(
+        settingId: Int,
+        value: Byte,
+        knownAddress: String? = null,
+        onStatus: (String) -> Unit = {}
+    ): Boolean = withContext(Dispatchers.IO) {
+        val device = if (knownAddress != null) {
+            bluetoothAdapter.getRemoteDevice(knownAddress)
+        } else {
+            onStatus("Scanning for GoPro…")
+            scanForGoPro(onStatus)
+        }
+        if (device == null) {
+            onStatus("No GoPro found.")
+            return@withContext false
+        }
+        onStatus("Applying setting to ${device.name ?: "GoPro"}…")
+        connectAndSendSettingCommand(device, settingId, value, onStatus)
+    }
+
+    @Suppress("DEPRECATION")
+    private suspend fun connectAndSendSettingCommand(
+        device: BluetoothDevice,
+        settingId: Int,
+        value: Byte,
+        onStatus: (String) -> Unit
+    ): Boolean = withContext(Dispatchers.IO) {
+        val cmd = byteArrayOf(0x03, settingId.toByte(), 0x01, value)
+        withTimeoutOrNull(CONNECT_TIMEOUT_MS) {
+            suspendCancellableCoroutine { cont ->
+                var cmdSent = false
+
+                val gattCallback = object : BluetoothGattCallback() {
+                    override fun onConnectionStateChange(
+                        gatt: BluetoothGatt, status: Int, newState: Int
+                    ) {
+                        when (newState) {
+                            BluetoothProfile.STATE_CONNECTED -> gatt.discoverServices()
+                            BluetoothProfile.STATE_DISCONNECTED -> {
+                                if (!cont.isCompleted) cont.resume(false)
+                            }
+                        }
+                    }
+
+                    override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+                        if (status != BluetoothGatt.GATT_SUCCESS) {
+                            if (!cont.isCompleted) cont.resume(false); return
+                        }
+                        val rsp = gatt.findCharacteristic(SETTINGS_RSP_UUID) ?: run {
+                            if (!cont.isCompleted) cont.resume(false); return
+                        }
+                        gatt.setCharacteristicNotification(rsp, true)
+                        val descriptor = rsp.getDescriptor(NOTIFY_DESCRIPTOR_UUID)
+                        if (descriptor != null) {
+                            descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                            gatt.writeDescriptor(descriptor)
+                        } else {
+                            cmdSent = true
+                            writeSettingReq(gatt, cmd)
+                        }
+                    }
+
+                    override fun onDescriptorWrite(
+                        gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int
+                    ) {
+                        if (descriptor.uuid == NOTIFY_DESCRIPTOR_UUID && !cmdSent) {
+                            cmdSent = true
+                            writeSettingReq(gatt, cmd)
+                        }
+                    }
+
+                    override fun onCharacteristicChanged(
+                        gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic
+                    ) {
+                        if (characteristic.uuid == SETTINGS_RSP_UUID) {
+                            val data = characteristic.value ?: return
+                            Log.d(TAG, "Setting response: ${data.joinToString { "0x%02x".format(it) }}")
+                            // Response: [len, setting_id, status] — status 0x00 = success
+                            val success = data.size >= 3 && data[2] == 0x00.toByte()
+                            if (!success) onStatus("Setting response: non-zero status 0x${data.getOrElse(2){0}.toString(16)}")
+                            gatt.disconnect()
+                            if (!cont.isCompleted) cont.resume(success)
+                        }
+                    }
+                }
+
+                val g = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+                this@GoProBleManager.gatt = g
+                cont.invokeOnCancellation { g.disconnect(); g.close() }
+            }
+        } ?: false
+    }
+
+    @Suppress("DEPRECATION")
+    private fun writeSettingReq(gatt: BluetoothGatt, cmd: ByteArray) {
+        val req = gatt.findCharacteristic(SETTINGS_REQ_UUID) ?: return
+        req.value = cmd
+        req.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        gatt.writeCharacteristic(req)
     }
 
     fun close() {
