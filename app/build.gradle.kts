@@ -61,7 +61,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     // FFmpeg Kit for Android (full-gpl: includes libx264, x265, etc. for transcoding)
     // Note: when targeting API 35+ (Android 15), switch to a 16KB-aligned build.
-    implementation("com.arthenica:ffmpeg-kit-full-gpl:6.0-2")
+    implementation("com.arthenica:ffmpeg-kit-full-gpl:6.0-2.LTS")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
