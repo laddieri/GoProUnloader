@@ -59,8 +59,9 @@ dependencies {
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-    // FFmpeg Kit for Android (min variant: no extra encoders, ~18 MB)
-    implementation("com.moizhassan.ffmpeg:ffmpeg-kit-16kb:6.1.1")
+    // FFmpeg Kit for Android (full-gpl: includes libx264, x265, etc. for transcoding)
+    // Note: when targeting API 35+ (Android 15), switch to a 16KB-aligned build.
+    implementation("com.arthenica:ffmpeg-kit-full-gpl:6.0-2")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
