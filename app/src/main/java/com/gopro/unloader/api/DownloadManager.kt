@@ -1,5 +1,6 @@
 package com.gopro.unloader.api
 
+import android.net.Network
 import android.util.Log
 import com.gopro.unloader.model.DownloadStatus
 import com.gopro.unloader.model.MediaFile
@@ -14,10 +15,26 @@ private const val CHUNK_SIZE = 65_536 // 64 KiB
 
 class DownloadManager {
 
-    private val client = OkHttpClient.Builder()
+    private var client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
         .build()
+
+    /** Rebuild the HTTP client to route downloads through the given network. */
+    fun bindToNetwork(network: Network) {
+        client = OkHttpClient.Builder()
+            .socketFactory(network.socketFactory)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .build()
+    }
+
+    fun unbindNetwork() {
+        client = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .build()
+    }
 
     /**
      * Downloads [file] to [destDir]/raw/[file.name].
