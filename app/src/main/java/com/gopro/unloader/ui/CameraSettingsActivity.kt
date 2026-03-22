@@ -61,6 +61,55 @@ class CameraSettingsActivity : AppCompatActivity() {
         SettingOption("Locked (Hero 11+)", 2)
     ))
 
+    private val fovSetting = CameraSetting(43, "Field of View", listOf(
+        SettingOption("Wide", 0),
+        SettingOption("Linear", 2),
+        SettingOption("HyperView", 9),
+        SettingOption("Linear + Horizon Leveling", 10)
+    ))
+
+    private val videoPerformanceSetting = CameraSetting(168, "Video Performance Mode", listOf(
+        SettingOption("Maximum Quality", 0),
+        SettingOption("Extended Battery", 1),
+        SettingOption("Tripod / Stationary", 2)
+    ))
+
+    private val windNoiseSetting = CameraSetting(162, "Wind Noise Reduction", listOf(
+        SettingOption("Off", 0),
+        SettingOption("Auto", 1)
+    ))
+
+    private val bitDepthSetting = CameraSetting(172, "Bit Depth", listOf(
+        SettingOption("8-bit", 0),
+        SettingOption("10-bit", 2)
+    ))
+
+    private val colorSetting = CameraSetting(44, "Color", listOf(
+        SettingOption("GoPro (Vivid)", 0),
+        SettingOption("Flat", 1),
+        SettingOption("Natural", 2)
+    ))
+
+    private val rawAudioSetting = CameraSetting(149, "RAW Audio", listOf(
+        SettingOption("Off", 0),
+        SettingOption("On", 1)
+    ))
+
+    private val timelapseSetting = CameraSetting(5, "Timelapse Interval", listOf(
+        SettingOption("0.5 seconds", 0),
+        SettingOption("1 second", 1),
+        SettingOption("2 seconds", 2),
+        SettingOption("5 seconds", 3),
+        SettingOption("10 seconds", 4),
+        SettingOption("30 seconds", 5),
+        SettingOption("60 seconds", 6)
+    ))
+
+    private val videoFormatSetting = CameraSetting(57, "Video Format", listOf(
+        SettingOption("NTSC", 0),
+        SettingOption("PAL", 1)
+    ))
+
     private val autoPowerOffSetting = CameraSetting(59, "Auto Power Off", listOf(
         SettingOption("Never", 0),
         SettingOption("1 minute", 1),
@@ -125,17 +174,25 @@ class CameraSettingsActivity : AppCompatActivity() {
     }
 
     private fun setupRows() {
-        binding.rowRecordingMode.setOnClickListener { showPresetDialog() }
-        binding.rowResolution.setOnClickListener    { showOptionsDialog(resolutionSetting) }
-        binding.rowFrameRate.setOnClickListener     { showOptionsDialog(frameRateSetting) }
-        binding.rowHypersmooth.setOnClickListener   { showOptionsDialog(hypersmoothSetting) }
-        binding.rowHorizonLock.setOnClickListener   { showOptionsDialog(horizonLockSetting) }
-        binding.rowAutoPowerOff.setOnClickListener  { showOptionsDialog(autoPowerOffSetting) }
-        binding.rowBeeps.setOnClickListener         { showOptionsDialog(beepsSetting) }
-        binding.rowLeds.setOnClickListener          { showOptionsDialog(ledSetting) }
-        binding.rowAntiFlicker.setOnClickListener   { showOptionsDialog(antiFlickerSetting) }
-        binding.rowGps.setOnClickListener           { showOptionsDialog(gpsSetting) }
-        binding.rowQuickCapture.setOnClickListener  { showOptionsDialog(quickCaptureSetting) }
+        binding.rowRecordingMode.setOnClickListener      { showPresetDialog() }
+        binding.rowResolution.setOnClickListener         { showOptionsDialog(resolutionSetting) }
+        binding.rowFrameRate.setOnClickListener          { showOptionsDialog(frameRateSetting) }
+        binding.rowHypersmooth.setOnClickListener        { showOptionsDialog(hypersmoothSetting) }
+        binding.rowHorizonLock.setOnClickListener        { showOptionsDialog(horizonLockSetting) }
+        binding.rowFov.setOnClickListener                { showOptionsDialog(fovSetting) }
+        binding.rowVideoPerformance.setOnClickListener   { showOptionsDialog(videoPerformanceSetting) }
+        binding.rowWindNoise.setOnClickListener          { showOptionsDialog(windNoiseSetting) }
+        binding.rowBitDepth.setOnClickListener           { showOptionsDialog(bitDepthSetting) }
+        binding.rowColor.setOnClickListener              { showOptionsDialog(colorSetting) }
+        binding.rowRawAudio.setOnClickListener           { showOptionsDialog(rawAudioSetting) }
+        binding.rowTimelapseInterval.setOnClickListener  { showOptionsDialog(timelapseSetting) }
+        binding.rowAutoPowerOff.setOnClickListener       { showOptionsDialog(autoPowerOffSetting) }
+        binding.rowBeeps.setOnClickListener              { showOptionsDialog(beepsSetting) }
+        binding.rowLeds.setOnClickListener               { showOptionsDialog(ledSetting) }
+        binding.rowAntiFlicker.setOnClickListener        { showOptionsDialog(antiFlickerSetting) }
+        binding.rowGps.setOnClickListener                { showOptionsDialog(gpsSetting) }
+        binding.rowQuickCapture.setOnClickListener       { showOptionsDialog(quickCaptureSetting) }
+        binding.rowVideoFormat.setOnClickListener        { showOptionsDialog(videoFormatSetting) }
     }
 
     private fun showPresetDialog() {
