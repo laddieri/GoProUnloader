@@ -28,11 +28,17 @@ class GoProApi {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    /** Returns true if the GoPro is reachable over WiFi. */
+    /** Short-timeout client for reachability pings — avoids blocking 30s per attempt. */
+    private val pingClient = OkHttpClient.Builder()
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(3, TimeUnit.SECONDS)
+        .build()
+
+    /** Returns true if the GoPro is reachable over WiFi. Uses fast timeouts. */
     fun isCameraReachable(): Boolean {
         return try {
             val request = Request.Builder().url(CAMERA_STATE_URL).build()
-            client.newCall(request).execute().use { it.isSuccessful }
+            pingClient.newCall(request).execute().use { it.isSuccessful }
         } catch (e: Exception) {
             false
         }
