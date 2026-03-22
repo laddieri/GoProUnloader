@@ -430,7 +430,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         when (result) {
             is WifiConnectResult.Connected -> {
-                log("WiFi connected. Verifying camera…")
+                log("WiFi connected. Binding network…")
+                // Explicitly bind HTTP clients to the GoPro WiFi network.
+                // Without this, OkHttp continues using the phone's default
+                // network (mobile data or home WiFi) and never reaches 10.5.5.9.
+                goProApi.bindToNetwork(result.network)
+                downloadMgr.bindToNetwork(result.network)
             }
             is WifiConnectResult.Failed -> {
                 log("Auto-connect failed: ${result.reason}")
@@ -446,6 +451,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun disconnectWifi() {
         wifiConnector?.disconnect()
         wifiConnector = null
+        goProApi.unbindNetwork()
+        downloadMgr.unbindNetwork()
     }
 
     private suspend fun waitForCameraConnection(): Boolean {

@@ -1,5 +1,6 @@
 package com.gopro.unloader.api
 
+import android.net.Network
 import android.util.Log
 import com.gopro.unloader.model.CameraInfo
 import com.gopro.unloader.model.MediaFile
@@ -8,6 +9,7 @@ import okhttp3.Request
 import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import javax.net.SocketFactory
 
 private const val TAG = "GoProApi"
 
@@ -23,16 +25,35 @@ class GoProApi {
         const val SHUTTER_STOP_URL = "$GOPRO_BASE/gopro/camera/shutter/stop"
     }
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .build()
+    private var client = buildClient(30, 60, null)
+    private var pingClient = buildClient(3, 3, null)
 
-    /** Short-timeout client for reachability pings — avoids blocking 30s per attempt. */
-    private val pingClient = OkHttpClient.Builder()
-        .connectTimeout(3, TimeUnit.SECONDS)
-        .readTimeout(3, TimeUnit.SECONDS)
-        .build()
+    /**
+     * Rebuild HTTP clients to route traffic through the given network.
+     * Must be called after WiFi connects so OkHttp uses the GoPro network's
+     * socket factory instead of the default (which stays on mobile/home WiFi).
+     */
+    fun bindToNetwork(network: Network) {
+        val factory = network.socketFactory
+        client = buildClient(30, 60, factory)
+        pingClient = buildClient(3, 3, factory)
+        Log.d(TAG, "HTTP clients bound to network $network")
+    }
+
+    /** Reset HTTP clients to the default socket factory. */
+    fun unbindNetwork() {
+        client = buildClient(30, 60, null)
+        pingClient = buildClient(3, 3, null)
+        Log.d(TAG, "HTTP clients unbound from network")
+    }
+
+    private fun buildClient(connectSec: Long, readSec: Long, factory: SocketFactory?): OkHttpClient {
+        val builder = OkHttpClient.Builder()
+            .connectTimeout(connectSec, TimeUnit.SECONDS)
+            .readTimeout(readSec, TimeUnit.SECONDS)
+        if (factory != null) builder.socketFactory(factory)
+        return builder.build()
+    }
 
     /** Returns true if the GoPro is reachable over WiFi. Uses fast timeouts. */
     fun isCameraReachable(): Boolean {
