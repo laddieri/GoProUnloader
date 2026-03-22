@@ -41,8 +41,8 @@ class GoProBleManager(private val context: Context) {
 
         val QUERY_REQ_UUID: UUID = UUID.fromString("b5f90076-aa8d-11e3-9046-0002a5d5c51b")
         val QUERY_RSP_UUID: UUID = UUID.fromString("b5f90077-aa8d-11e3-9046-0002a5d5c51b")
-        // 0x13 = Get Status Value; 0x02 = battery %, 0x36 (54) = SD remaining KB
-        val STATUS_QUERY_CMD = byteArrayOf(0x03, 0x13, 0x02, 0x36.toByte())
+        // 0x13 = Get Status Value; 0x46 (70) = battery %, 0x36 (54) = SD remaining KB
+        val STATUS_QUERY_CMD = byteArrayOf(0x03, 0x13, 0x46, 0x36.toByte())
 
         val SHUTTER_START_CMD = byteArrayOf(0x03, 0x01, 0x01, 0x01)
         val SHUTTER_STOP_CMD = byteArrayOf(0x03, 0x01, 0x01, 0x00)
@@ -407,7 +407,7 @@ class GoProBleManager(private val context: Context) {
             i += 2
             if (i + len > data.size) break
             when (id) {
-                0x02 -> if (len == 1) battery = data[i].toInt() and 0xFF
+                0x46 -> if (len == 1) battery = data[i].toInt() and 0xFF
                 0x36 -> if (len == 4) {
                     spaceKb = ((data[i].toLong() and 0xFF) shl 24) or
                               ((data[i + 1].toLong() and 0xFF) shl 16) or
