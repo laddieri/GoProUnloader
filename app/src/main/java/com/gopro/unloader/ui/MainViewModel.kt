@@ -24,6 +24,8 @@ import com.gopro.unloader.model.TranscodeStatus
 import com.gopro.unloader.util.MediaStoreHelper
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -580,18 +582,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun fetchAndShowList(): List<MediaFile> {
         log("Fetching media list…")
-        val files = withContext(Dispatchers.IO) { goProApi.getMediaList() }
+        val files = withContext(Dispatchers.IO) {
+            val list = goProApi.getMediaList()
+            list.filter { it.name.uppercase().endsWith(".MP4") }
+                .map { file -> async { file.duration = goProApi.getMediaInfo(file.directory, file.name) } }
+                .awaitAll()
+            list
+        }
         _mediaFiles.postValue(files)
         log("Found ${files.size} file(s) on GoPro.")
-        viewModelScope.launch(Dispatchers.IO) {
-            files.filter { it.name.uppercase().endsWith(".MP4") }.forEach { file ->
-                val dur = goProApi.getMediaInfo(file.directory, file.name)
-                if (dur > 0) {
-                    file.duration = dur
-                    notifyListChanged()
-                }
-            }
-        }
         return files
     }
 
