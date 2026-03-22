@@ -85,6 +85,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // ----------------------------------------------------------- settings
     var bleAddress: String? = null
 
+    /** The best available BLE address to pass to other screens. */
+    val effectiveBleAddress: String? get() = lastKnownBleAddress ?: bleAddress
+
     // --------------------------------------------------------------- helpers
     private val goProApi = GoProApi()
     private val downloadMgr = DownloadManager()
