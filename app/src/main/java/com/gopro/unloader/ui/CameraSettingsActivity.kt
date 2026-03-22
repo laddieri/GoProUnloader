@@ -2,6 +2,8 @@ package com.gopro.unloader.ui
 
 import android.os.Bundle
 import android.view.View
+import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -146,6 +148,9 @@ class CameraSettingsActivity : AppCompatActivity() {
         SettingOption("On", 1)
     ))
 
+    /** All queryable settings paired with their row view (set in setupRows). */
+    private val settingRows = mutableListOf<Pair<CameraSetting, LinearLayout>>()
+
     // ------------------------------------------------------------------ lifecycle
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -161,6 +166,10 @@ class CameraSettingsActivity : AppCompatActivity() {
 
         observeViewModel()
         setupRows()
+
+        // Kick off background query for current setting values
+        val ids = settingRows.map { it.first.id }
+        viewModel.loadCurrentSettings(ids)
     }
 
     private fun observeViewModel() {
@@ -171,28 +180,43 @@ class CameraSettingsActivity : AppCompatActivity() {
         viewModel.isBusy.observe(this) { busy ->
             binding.progressSettings.visibility = if (busy) View.VISIBLE else View.GONE
         }
+        viewModel.currentSettings.observe(this) { settings ->
+            for ((cameraSetting, row) in settingRows) {
+                val rawValue = settings[cameraSetting.id] ?: continue
+                val label = cameraSetting.options
+                    .firstOrNull { (it.value.toInt() and 0xFF) == rawValue }
+                    ?.label ?: continue
+                subtitle(row).text = label
+            }
+        }
     }
 
     private fun setupRows() {
         binding.rowRecordingMode.setOnClickListener      { showPresetDialog() }
-        binding.rowResolution.setOnClickListener         { showOptionsDialog(resolutionSetting) }
-        binding.rowFrameRate.setOnClickListener          { showOptionsDialog(frameRateSetting) }
-        binding.rowHypersmooth.setOnClickListener        { showOptionsDialog(hypersmoothSetting) }
-        binding.rowHorizonLock.setOnClickListener        { showOptionsDialog(horizonLockSetting) }
-        binding.rowFov.setOnClickListener                { showOptionsDialog(fovSetting) }
-        binding.rowVideoPerformance.setOnClickListener   { showOptionsDialog(videoPerformanceSetting) }
-        binding.rowWindNoise.setOnClickListener          { showOptionsDialog(windNoiseSetting) }
-        binding.rowBitDepth.setOnClickListener           { showOptionsDialog(bitDepthSetting) }
-        binding.rowColor.setOnClickListener              { showOptionsDialog(colorSetting) }
-        binding.rowRawAudio.setOnClickListener           { showOptionsDialog(rawAudioSetting) }
-        binding.rowTimelapseInterval.setOnClickListener  { showOptionsDialog(timelapseSetting) }
-        binding.rowAutoPowerOff.setOnClickListener       { showOptionsDialog(autoPowerOffSetting) }
-        binding.rowBeeps.setOnClickListener              { showOptionsDialog(beepsSetting) }
-        binding.rowLeds.setOnClickListener               { showOptionsDialog(ledSetting) }
-        binding.rowAntiFlicker.setOnClickListener        { showOptionsDialog(antiFlickerSetting) }
-        binding.rowGps.setOnClickListener                { showOptionsDialog(gpsSetting) }
-        binding.rowQuickCapture.setOnClickListener       { showOptionsDialog(quickCaptureSetting) }
-        binding.rowVideoFormat.setOnClickListener        { showOptionsDialog(videoFormatSetting) }
+
+        fun reg(setting: CameraSetting, row: LinearLayout) {
+            settingRows += setting to row
+            row.setOnClickListener { showOptionsDialog(setting) }
+        }
+
+        reg(resolutionSetting,       binding.rowResolution)
+        reg(frameRateSetting,        binding.rowFrameRate)
+        reg(hypersmoothSetting,      binding.rowHypersmooth)
+        reg(horizonLockSetting,      binding.rowHorizonLock)
+        reg(fovSetting,              binding.rowFov)
+        reg(videoPerformanceSetting, binding.rowVideoPerformance)
+        reg(windNoiseSetting,        binding.rowWindNoise)
+        reg(bitDepthSetting,         binding.rowBitDepth)
+        reg(colorSetting,            binding.rowColor)
+        reg(rawAudioSetting,         binding.rowRawAudio)
+        reg(timelapseSetting,        binding.rowTimelapseInterval)
+        reg(autoPowerOffSetting,     binding.rowAutoPowerOff)
+        reg(beepsSetting,            binding.rowBeeps)
+        reg(ledSetting,              binding.rowLeds)
+        reg(antiFlickerSetting,      binding.rowAntiFlicker)
+        reg(gpsSetting,              binding.rowGps)
+        reg(quickCaptureSetting,     binding.rowQuickCapture)
+        reg(videoFormatSetting,      binding.rowVideoFormat)
     }
 
     private fun showPresetDialog() {
@@ -209,13 +233,25 @@ class CameraSettingsActivity : AppCompatActivity() {
 
     private fun showOptionsDialog(setting: CameraSetting) {
         val labels = setting.options.map { it.label }.toTypedArray()
+        val currentRaw = viewModel.currentSettings.value?.get(setting.id)
+        val currentIdx = if (currentRaw != null) {
+            setting.options.indexOfFirst { (it.value.toInt() and 0xFF) == currentRaw }.takeIf { it >= 0 }
+        } else null
+
         AlertDialog.Builder(this)
             .setTitle(setting.name)
-            .setItems(labels) { _, which ->
+            .setSingleChoiceItems(labels, currentIdx ?: -1) { dialog, which ->
                 val opt = setting.options[which]
                 viewModel.applySetting(setting.id, opt.value, setting.name)
+                // Optimistically update the subtitle
+                val row = settingRows.firstOrNull { it.first.id == setting.id }?.second
+                row?.let { subtitle(it).text = opt.label }
+                dialog.dismiss()
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
+
+    /** Returns the subtitle TextView (child index 1) of a settings row. */
+    private fun subtitle(row: LinearLayout): TextView = row.getChildAt(1) as TextView
 }

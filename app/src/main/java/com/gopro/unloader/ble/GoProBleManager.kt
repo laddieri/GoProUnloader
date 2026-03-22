@@ -389,6 +389,162 @@ class GoProBleManager(private val context: Context) {
         }
     }
 
+    /**
+     * Queries the current value of each requested setting ID from the camera.
+     * Uses the BLE Query API (GP-0076/GP-0077, command 0x12 = Get Settings Values).
+     * Handles multi-packet BLE responses via PacketAssembler.
+     * Returns a map of settingId -> current value (as Int).
+     */
+    suspend fun querySettingValues(
+        settingIds: List<Int>,
+        knownAddress: String? = null,
+        onStatus: (String) -> Unit = {}
+    ): Map<Int, Int> = withContext(Dispatchers.IO) {
+        val device = if (knownAddress != null) {
+            bluetoothAdapter.getRemoteDevice(knownAddress)
+        } else {
+            onStatus("Scanning for GoPro…")
+            scanForGoPro(onStatus)
+        } ?: return@withContext emptyMap()
+
+        // Build command: [payload_len, 0x12, id1, id2, ...]
+        val cmd = ByteArray(2 + settingIds.size).also { b ->
+            b[0] = (1 + settingIds.size).toByte()
+            b[1] = 0x12
+            settingIds.forEachIndexed { i, id -> b[2 + i] = id.toByte() }
+        }
+        connectAndQuerySettingValues(device, cmd, onStatus)
+    }
+
+    @Suppress("DEPRECATION")
+    private suspend fun connectAndQuerySettingValues(
+        device: BluetoothDevice,
+        cmd: ByteArray,
+        onStatus: (String) -> Unit
+    ): Map<Int, Int> = withContext(Dispatchers.IO) {
+        withTimeoutOrNull(CONNECT_TIMEOUT_MS) {
+            suspendCancellableCoroutine { cont ->
+                val assembler = PacketAssembler()
+                var cmdSent = false
+
+                val cb = object : BluetoothGattCallback() {
+                    override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+                        when (newState) {
+                            BluetoothProfile.STATE_CONNECTED -> gatt.discoverServices()
+                            BluetoothProfile.STATE_DISCONNECTED -> { if (!cont.isCompleted) cont.resume(emptyMap()) }
+                        }
+                    }
+
+                    override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+                        if (status != BluetoothGatt.GATT_SUCCESS) { if (!cont.isCompleted) cont.resume(emptyMap()); return }
+                        val rsp = gatt.findCharacteristic(QUERY_RSP_UUID) ?: run { if (!cont.isCompleted) cont.resume(emptyMap()); return }
+                        gatt.setCharacteristicNotification(rsp, true)
+                        val desc = rsp.getDescriptor(NOTIFY_DESCRIPTOR_UUID)
+                        if (desc != null) {
+                            desc.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                            gatt.writeDescriptor(desc)
+                        } else {
+                            cmdSent = true; sendQueryReq(gatt, cmd)
+                        }
+                    }
+
+                    override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+                        if (descriptor.uuid == NOTIFY_DESCRIPTOR_UUID && !cmdSent) {
+                            cmdSent = true; sendQueryReq(gatt, cmd)
+                        }
+                    }
+
+                    override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+                        if (characteristic.uuid != QUERY_RSP_UUID) return
+                        val raw = characteristic.value ?: return
+                        val assembled = assembler.process(raw) ?: return  // still collecting packets
+                        gatt.disconnect()
+                        if (!cont.isCompleted) cont.resume(parseSettingsResponse(assembled))
+                    }
+                }
+
+                val g = device.connectGatt(context, false, cb, BluetoothDevice.TRANSPORT_LE)
+                this@GoProBleManager.gatt = g
+                cont.invokeOnCancellation { g.disconnect(); g.close() }
+            }
+        } ?: emptyMap()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun sendQueryReq(gatt: BluetoothGatt, cmd: ByteArray) {
+        val req = gatt.findCharacteristic(QUERY_REQ_UUID) ?: return
+        req.value = cmd
+        req.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        gatt.writeCharacteristic(req)
+    }
+
+    /**
+     * Parses an assembled settings query response (command 0x12).
+     * Assembled payload format (GP framing already stripped by PacketAssembler):
+     *   [0x12, status, (setting_id, value_len, value_bytes)...]
+     */
+    private fun parseSettingsResponse(data: ByteArray): Map<Int, Int> {
+        if (data.size < 2 || data[0] != 0x12.toByte() || data[1] != 0x00.toByte()) {
+            Log.e(TAG, "Unexpected settings response: ${data.take(6).joinToString { "0x%02x".format(it) }}")
+            return emptyMap()
+        }
+        val result = mutableMapOf<Int, Int>()
+        var i = 2
+        while (i + 1 < data.size) {
+            val id = data[i].toInt() and 0xFF
+            val len = data[i + 1].toInt() and 0xFF
+            i += 2
+            if (len == 0 || i + len > data.size) break
+            var value = 0
+            for (j in 0 until len) value = (value shl 8) or (data[i + j].toInt() and 0xFF)
+            result[id] = value
+            i += len
+        }
+        Log.d(TAG, "Settings parsed: $result")
+        return result
+    }
+
+    /**
+     * Assembles multi-packet BLE responses from the GoPro.
+     * The GoPro BLE framing format:
+     *   Start packet byte 0: 0x0X (General, len=X), 0x2X+next (Extended 13-bit), 0x4X... (Extended 16-bit)
+     *   Continuation packet byte 0: 0x80+ (MSB set)
+     * Strips framing bytes and returns the assembled application payload.
+     */
+    private class PacketAssembler {
+        private var expectedLen = 0
+        private val buf = mutableListOf<Byte>()
+        private var started = false
+
+        fun process(raw: ByteArray): ByteArray? {
+            if (raw.isEmpty()) return null
+            val hdr = raw[0].toInt() and 0xFF
+            if (hdr and 0x80 == 0) {
+                // Start packet — parse header to get total payload length
+                buf.clear()
+                val (len, offset) = when {
+                    hdr and 0xE0 == 0x00 -> (hdr and 0x1F) to 1
+                    hdr and 0xE0 == 0x20 -> {
+                        val l = ((hdr and 0x1F) shl 8) or (raw.getOrElse(1) { 0 }.toInt() and 0xFF)
+                        l to 2
+                    }
+                    else -> {
+                        val l = ((raw.getOrElse(1) { 0 }.toInt() and 0xFF) shl 8) or
+                            (raw.getOrElse(2) { 0 }.toInt() and 0xFF)
+                        l to 3
+                    }
+                }
+                expectedLen = len
+                for (i in offset until raw.size) buf.add(raw[i])
+                started = true
+            } else if (started) {
+                // Continuation packet — skip sequence byte, append payload
+                for (i in 1 until raw.size) buf.add(raw[i])
+            }
+            return if (started && buf.size >= expectedLen) buf.take(expectedLen).toByteArray() else null
+        }
+    }
+
     @Suppress("DEPRECATION")
     private fun sendStatusQueryCommand(gatt: BluetoothGatt) {
         val queryReq = gatt.findCharacteristic(QUERY_REQ_UUID) ?: run {
