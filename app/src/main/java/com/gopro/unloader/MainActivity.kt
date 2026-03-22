@@ -134,6 +134,14 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        var lastPromptId = 0
+        viewModel.postTransferPrompt.observe(this) { prompt ->
+            if (prompt != null && prompt.id != lastPromptId) {
+                lastPromptId = prompt.id
+                showPostTransferDialog(prompt)
+            }
+        }
+
         viewModel.isBusy.observe(this) { busy ->
             binding.btnWakeCamera.isEnabled = !busy
             binding.btnBrowseFiles.isEnabled = !busy
@@ -270,14 +278,8 @@ class MainActivity : AppCompatActivity() {
     // =========================================================== transfer confirm dialog
 
     private fun showTransferConfirmDialog(selectedCount: Int) {
-        var transcode = true
-        var deleteFromCamera = true
-
-        val items = arrayOf(
-            "Transcode videos to 1080p",
-            "Delete from camera after transfer"
-        )
-        val checked = booleanArrayOf(transcode, deleteFromCamera)
+        val items = arrayOf("Transcode videos to 1080p")
+        val checked = booleanArrayOf(true)
 
         AlertDialog.Builder(this)
             .setTitle("Transfer $selectedCount file(s)")
@@ -286,12 +288,48 @@ class MainActivity : AppCompatActivity() {
                 checked[which] = isChecked
             }
             .setPositiveButton("Transfer") { _, _ ->
-                viewModel.startTransfer(
-                    transcode = checked[0],
-                    deleteFromCamera = checked[1]
-                )
+                viewModel.startTransfer(transcode = checked[0])
             }
             .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showPostTransferDialog(prompt: MainViewModel.PostTransferPrompt) {
+        val items = mutableListOf<String>()
+        val checkedList = mutableListOf<Boolean>()
+
+        // Index mapping: track which option is at which position
+        var deleteFromGoproIdx = -1
+        var deleteLocalIdx = -1
+
+        if (prompt.hasGoproFiles) {
+            deleteFromGoproIdx = items.size
+            items.add("Delete originals from GoPro")
+            checkedList.add(false)
+        }
+        if (prompt.hasLocalOriginals) {
+            deleteLocalIdx = items.size
+            items.add("Delete full-size videos from phone (keep 1080p only)")
+            checkedList.add(true)
+        }
+
+        val checked = checkedList.toBooleanArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("Transfer complete")
+            .setMessage("What would you like to do with the original files?")
+            .setMultiChoiceItems(items.toTypedArray(), checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton("Continue") { _, _ ->
+                viewModel.submitPostTransferChoice(
+                    MainViewModel.PostTransferChoice(
+                        deleteFromGoPro = deleteFromGoproIdx >= 0 && checked[deleteFromGoproIdx],
+                        deleteLocalOriginals = deleteLocalIdx >= 0 && checked[deleteLocalIdx]
+                    )
+                )
+            }
+            .setCancelable(false)
             .show()
     }
 
@@ -366,18 +404,9 @@ class MainActivity : AppCompatActivity() {
     // =========================================================== settings dialog
 
     private fun showSettingsDialog() {
-        val items = arrayOf("Keep originals after transcode")
-        val checked = booleanArrayOf(viewModel.keepOriginals)
-
         AlertDialog.Builder(this)
             .setTitle("Settings")
-            .setMultiChoiceItems(items, checked) { _, which, isChecked ->
-                checked[which] = isChecked
-            }
-            .setPositiveButton("Apply") { _, _ ->
-                viewModel.keepOriginals = checked[0]
-            }
-            .setNeutralButton("BLE Address") { _, _ ->
+            .setPositiveButton("BLE Address") { _, _ ->
                 showBleAddressDialog()
             }
             .setNegativeButton("Cancel", null)
