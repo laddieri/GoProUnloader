@@ -316,8 +316,7 @@ class MainActivity : AppCompatActivity() {
         val checked = checkedList.toBooleanArray()
 
         AlertDialog.Builder(this)
-            .setTitle("Transfer complete")
-            .setMessage("What would you like to do with the original files?")
+            .setTitle("What would you like to do with the original files?")
             .setMultiChoiceItems(items.toTypedArray(), checked) { _, which, isChecked ->
                 checked[which] = isChecked
             }
