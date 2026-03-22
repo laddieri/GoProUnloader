@@ -2,6 +2,9 @@ package com.gopro.unloader.ui
 
 import android.app.Application
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.os.Build
 import android.os.Environment
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
@@ -50,6 +53,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isConnected = MutableLiveData(false)
     val isConnected: LiveData<Boolean> = _isConnected
+
+    private val _wifiCredentials = MutableLiveData<WifiCredentials?>()
+    val wifiCredentials: LiveData<WifiCredentials?> = _wifiCredentials
+
+    /** Signal for the Activity to open WiFi settings. Incremented each time. */
+    private val _openWifiSettings = MutableLiveData(0)
+    val openWifiSettings: LiveData<Int> = _openWifiSettings
 
     // ----------------------------------------------------------- settings
     var keepOriginals: Boolean = false
@@ -424,28 +434,68 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun connectWifi(creds: WifiCredentials): Boolean {
-        log("Connecting to GoPro WiFi (${creds.ssid})…")
-        val connector = WifiConnector(context).also { wifiConnector = it }
-        val result = connector.connectToGoProWifi(creds.ssid, creds.password)
-
-        when (result) {
-            is WifiConnectResult.Connected -> {
-                log("WiFi connected. Binding network…")
-                // Explicitly bind HTTP clients to the GoPro WiFi network.
-                // Without this, OkHttp continues using the phone's default
-                // network (mobile data or home WiFi) and never reaches 10.5.5.9.
-                goProApi.bindToNetwork(result.network)
-                downloadMgr.bindToNetwork(result.network)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            // Legacy API 26-28: programmatic WiFi switching actually works
+            log("Connecting to GoPro WiFi (${creds.ssid})…")
+            val connector = WifiConnector(context).also { wifiConnector = it }
+            val result = connector.connectToGoProWifi(creds.ssid, creds.password)
+            when (result) {
+                is WifiConnectResult.Connected -> {
+                    log("WiFi connected.")
+                    goProApi.bindToNetwork(result.network)
+                    downloadMgr.bindToNetwork(result.network)
+                }
+                is WifiConnectResult.Failed -> {
+                    log("Auto-connect failed: ${result.reason}")
+                    connector.disconnect()
+                    wifiConnector = null
+                }
             }
-            is WifiConnectResult.Failed -> {
-                log("Auto-connect failed: ${result.reason}")
-                log("Please connect to \"${creds.ssid}\" manually (password: ${creds.password}).")
-                connector.disconnect()
-                wifiConnector = null
-            }
+            return waitForCameraConnection()
         }
 
-        return waitForCameraConnection()
+        // Android 10+: Can't programmatically switch WiFi. Show credentials
+        // and open WiFi settings so the user can connect manually.
+        _wifiCredentials.postValue(creds)
+        _openWifiSettings.postValue((_openWifiSettings.value ?: 0) + 1)
+        log("Switch your WiFi to the GoPro network:")
+        log("  Network: ${creds.ssid}")
+        log("  Password: ${creds.password}")
+        log("Waiting for connection…")
+
+        val connected = waitForCameraConnection()
+        if (connected) {
+            // Bind OkHttp to the WiFi network so Android doesn't route traffic
+            // through mobile data (GoPro WiFi has no internet).
+            bindToActiveWifiNetwork()
+            _wifiCredentials.postValue(null) // hide the credentials card
+        }
+        return connected
+    }
+
+    /**
+     * Find the currently active WiFi network and bind HTTP clients to it.
+     * On Android 10+, the system may prefer mobile data over a WiFi network
+     * that has no internet (like GoPro). Explicit binding ensures our traffic
+     * goes through the WiFi interface.
+     */
+    private fun bindToActiveWifiNetwork() {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        // Walk all networks to find WiFi
+        for (network in cm.allNetworks) {
+            val caps = cm.getNetworkCapabilities(network) ?: continue
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                goProApi.bindToNetwork(network)
+                downloadMgr.bindToNetwork(network)
+                log("Bound to WiFi network.")
+                return
+            }
+        }
+        // Fallback: use active network (might be WiFi if user just connected)
+        cm.activeNetwork?.let { network ->
+            goProApi.bindToNetwork(network)
+            downloadMgr.bindToNetwork(network)
+        }
     }
 
     fun disconnectWifi() {
@@ -453,6 +503,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         wifiConnector = null
         goProApi.unbindNetwork()
         downloadMgr.unbindNetwork()
+        _wifiCredentials.postValue(null)
     }
 
     private suspend fun waitForCameraConnection(): Boolean {

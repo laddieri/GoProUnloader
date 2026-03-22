@@ -23,8 +23,12 @@
     <string name="recording_status_active">\u25CF Recording</string>
     <string name="recording_status_stopped">\u25A0 Stopped</string>
 
+    <!-- WiFi card -->
+    <string name="wifi_card_title">Connect to GoPro WiFi</string>
+    <string name="btn_open_wifi_settings">Open WiFi Settings</string>
+
     <!-- Hints -->
     <string name="hint_wake_camera">Uses Bluetooth to wake the camera and check battery and storage</string>
     <string name="hint_ble_controls">Uses Bluetooth \u2014 no WiFi needed</string>
-    <string name="hint_wifi_files">Connects to GoPro WiFi automatically to list and transfer files</string>
+    <string name="hint_wifi_files">Requires switching your phone\u2019s WiFi to the GoPro network</string>
 </resources>

@@ -3,11 +3,14 @@ package com.gopro.unloader
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
@@ -113,6 +116,24 @@ class MainActivity : AppCompatActivity() {
             binding.layoutConnected.visibility = if (connected) View.VISIBLE else View.GONE
         }
 
+        viewModel.wifiCredentials.observe(this) { creds ->
+            if (creds != null) {
+                binding.cardWifi.visibility = View.VISIBLE
+                binding.tvWifiSsid.text = creds.ssid
+                binding.tvWifiPassword.text = creds.password
+            } else {
+                binding.cardWifi.visibility = View.GONE
+            }
+        }
+
+        var lastWifiSettingsEvent = 0
+        viewModel.openWifiSettings.observe(this) { event ->
+            if (event > lastWifiSettingsEvent) {
+                lastWifiSettingsEvent = event
+                openWifiSettings()
+            }
+        }
+
         viewModel.isBusy.observe(this) { busy ->
             binding.btnWakeCamera.isEnabled = !busy
             binding.btnBrowseFiles.isEnabled = !busy
@@ -203,6 +224,10 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnBrowseFiles.setOnClickListener {
             withPermissionsAndBluetooth { viewModel.browseFiles() }
+        }
+
+        binding.btnOpenWifiSettings.setOnClickListener {
+            openWifiSettings()
         }
 
         binding.btnSelectAll.setOnClickListener {
@@ -316,6 +341,26 @@ class MainActivity : AppCompatActivity() {
             return
         }
         action()
+    }
+
+    // =========================================================== wifi settings
+
+    private fun openWifiSettings() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Android 10+: inline WiFi panel (quick settings overlay)
+                startActivity(Intent(Settings.Panel.ACTION_WIFI))
+            } else {
+                startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+            }
+        } catch (e: Exception) {
+            // Fallback if Panel intent not supported
+            try {
+                startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+            } catch (_: Exception) {
+                Toast.makeText(this, "Open WiFi settings manually.", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     // =========================================================== settings dialog
