@@ -408,11 +408,10 @@ class GoProBleManager(private val context: Context) {
             if (i + len > data.size) break
             when (id) {
                 0x46 -> if (len == 1) battery = data[i].toInt() and 0xFF
-                0x36 -> if (len == 4) {
-                    spaceKb = ((data[i].toLong() and 0xFF) shl 24) or
-                              ((data[i + 1].toLong() and 0xFF) shl 16) or
-                              ((data[i + 2].toLong() and 0xFF) shl 8) or
-                              (data[i + 3].toLong() and 0xFF)
+                0x36 -> if (len in 1..8) {
+                    var kb = 0L
+                    for (j in 0 until len) kb = (kb shl 8) or (data[i + j].toLong() and 0xFF)
+                    spaceKb = kb
                 }
             }
             i += len
