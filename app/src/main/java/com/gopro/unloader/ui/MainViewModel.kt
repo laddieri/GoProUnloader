@@ -12,6 +12,8 @@ import com.gopro.unloader.api.GoProApi
 import com.gopro.unloader.api.TranscodeManager
 import com.gopro.unloader.ble.GoProBleManager
 import com.gopro.unloader.ble.WifiCredentials
+import com.gopro.unloader.wifi.WifiConnectResult
+import com.gopro.unloader.wifi.WifiConnector
 import com.gopro.unloader.model.CameraInfo
 import com.gopro.unloader.model.DownloadStatus
 import com.gopro.unloader.model.MediaFile
@@ -59,6 +61,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val downloadMgr = DownloadManager()
     private val transcodeMgr = TranscodeManager()
     private var bleMgr: GoProBleManager? = null
+    private var wifiConnector: WifiConnector? = null
 
     private val context: Context get() = getApplication()
 
@@ -101,10 +104,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         return@launch
                     }
                     _wifiCredentials.postValue(creds)
-                    log("WiFi AP credentials: SSID=${creds.ssid} / Password=${creds.password}")
-                    log("Please connect your device to the GoPro WiFi network now.")
                     _phase.value = Phase.WIFI_WAIT
-                    if (!waitForCameraConnection()) return@launch
+                    if (!connectWifi(creds)) return@launch
                 } else {
                     log("Skipping BLE. Checking WiFi connection…")
                     _phase.value = Phase.WIFI_WAIT
@@ -127,7 +128,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Fetch and display the file list without BLE (assumes WiFi already connected). */
+    /** Fetch and display the file list without BLE (assumes WiFi already connected).  */
     fun listFiles() {
         if (_isBusy.value == true) return
         _isBusy.value = true
@@ -211,10 +212,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         return@launch
                     }
                     _wifiCredentials.postValue(creds)
-                    log("Camera WiFi AP enabled. Connect your phone to \"${creds.ssid}\" then the recording will start.")
-
                     _phase.value = Phase.WIFI_WAIT
-                    if (!waitForCameraConnection()) {
+                    if (!connectWifi(creds)) {
                         log("Cannot reach camera over WiFi. Connect to the GoPro network and try again.")
                         return@launch
                     }
@@ -234,6 +233,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _isBusy.value = false
                 bleMgr?.close()
                 bleMgr = null
+                wifiConnector?.disconnect()
+                wifiConnector = null
             }
         }
     }
@@ -430,6 +431,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         log("Done! Transferred: $dlCount  Errors: $errCount")
         log("Files saved to Movies/GoProUnloader")
         _phase.value = Phase.DONE
+    }
+
+    /**
+     * Attempt programmatic WiFi connection, falling back to manual if it fails.
+     * Returns true once the camera HTTP API is reachable.
+     */
+    private suspend fun connectWifi(creds: WifiCredentials): Boolean {
+        log("Connecting to GoPro WiFi (${creds.ssid})…")
+        val connector = WifiConnector(context).also { wifiConnector = it }
+        val result = connector.connectToGoProWifi(creds.ssid, creds.password)
+
+        when (result) {
+            is WifiConnectResult.Connected -> {
+                log("WiFi connected. Verifying camera…")
+            }
+            is WifiConnectResult.Failed -> {
+                log("Auto-connect failed: ${result.reason}")
+                log("Please connect to \"${creds.ssid}\" manually (password: ${creds.password}).")
+                // Clean up the failed connector so manual connect can work
+                connector.disconnect()
+                wifiConnector = null
+            }
+        }
+
+        return waitForCameraConnection()
+    }
+
+    /** Release the programmatic WiFi binding. Safe to call even if never connected. */
+    fun disconnectWifi() {
+        wifiConnector?.disconnect()
+        wifiConnector = null
     }
 
     private suspend fun waitForCameraConnection(): Boolean {
