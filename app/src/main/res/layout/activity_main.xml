@@ -55,14 +55,32 @@
             <!-- SECTION 1: CONNECT                         -->
             <!-- ========================================== -->
 
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_wake_camera"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="4dp"
-                android:text="@string/btn_wake_camera"
-                app:icon="@android:drawable/stat_sys_data_bluetooth"
-                app:iconGravity="textStart" />
+                android:orientation="horizontal"
+                android:layout_marginBottom="4dp">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_wake_camera"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="8dp"
+                    android:text="@string/btn_wake_camera"
+                    app:icon="@android:drawable/stat_sys_data_bluetooth"
+                    app:iconGravity="textStart" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_sleep_camera"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/btn_sleep_camera"
+                    android:visibility="gone" />
+
+            </LinearLayout>
 
             <TextView
                 android:layout_width="match_parent"
@@ -229,6 +247,14 @@
                                 android:text="@string/btn_stop_recording" />
 
                         </LinearLayout>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_camera_settings"
+                            style="@style/Widget.Material3.Button.TonalButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/btn_camera_settings" />
 
                         <TextView
                             android:layout_width="match_parent"
