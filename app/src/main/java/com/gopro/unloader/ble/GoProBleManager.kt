@@ -52,6 +52,11 @@ class GoProBleManager(private val context: Context) {
         val SETTINGS_REQ_UUID: UUID = UUID.fromString("b5f90074-aa8d-11e3-9046-0002a5d5c51b")
         val SETTINGS_RSP_UUID: UUID = UUID.fromString("b5f90075-aa8d-11e3-9046-0002a5d5c51b")
 
+        // Load Preset Group: [len=4, cmd=0x40, param_len=2, group_high, group_low]
+        val PRESET_GROUP_VIDEO      = byteArrayOf(0x04, 0x40, 0x02, 0x03, 0xE8.toByte()) // 1000
+        val PRESET_GROUP_PHOTO      = byteArrayOf(0x04, 0x40, 0x02, 0x03, 0xE9.toByte()) // 1001
+        val PRESET_GROUP_TIMELAPSE  = byteArrayOf(0x04, 0x40, 0x02, 0x03, 0xEA.toByte()) // 1002
+
         const val SCAN_TIMEOUT_MS = 15_000L
         const val CONNECT_TIMEOUT_MS = 20_000L
         const val RESPONSE_TIMEOUT_MS = 5_000L

@@ -112,7 +112,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // -------------------------------------------------------------- enums
     enum class Phase {
         IDLE, BLE_SCAN, WIFI_WAIT, FETCHING_LIST, LIST_READY, DOWNLOADING, TRANSCODING, DONE,
-        STARTING_RECORDING, STOPPING_RECORDING, DELETING, SLEEPING, APPLYING_SETTING
+        STARTING_RECORDING, STOPPING_RECORDING, DELETING, SLEEPING, APPLYING_SETTING, LOADING_PRESET
     }
 
     // ===================================================================
@@ -297,6 +297,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 ble.close()
                 bleMgr = null
                 log(if (ok) "Setting applied." else "Failed to apply setting.")
+                _phase.value = Phase.IDLE
+            } finally {
+                _isBusy.value = false
+                bleMgr?.close()
+                bleMgr = null
+            }
+        }
+    }
+
+    // ===================================================================
+    // RECORDING MODE (preset group switch via BLE command)
+    // ===================================================================
+
+    fun loadPresetGroup(cmd: ByteArray, name: String) {
+        if (_isBusy.value == true) return
+        _isBusy.value = true
+
+        viewModelScope.launch {
+            try {
+                _phase.value = Phase.LOADING_PRESET
+                log("Switching to $name mode…")
+                val ble = GoProBleManager(context).also { bleMgr = it }
+                val ok = ble.sendBleCommand(
+                    cmd,
+                    knownAddress = lastKnownBleAddress ?: bleAddress,
+                    onStatus = { log(it) }
+                )
+                ble.close()
+                bleMgr = null
+                log(if (ok) "Switched to $name mode." else "Failed to switch to $name mode.")
                 _phase.value = Phase.IDLE
             } finally {
                 _isBusy.value = false
