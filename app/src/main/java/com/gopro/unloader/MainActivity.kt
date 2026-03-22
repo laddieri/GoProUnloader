@@ -283,7 +283,6 @@ class MainActivity : AppCompatActivity() {
 
         AlertDialog.Builder(this)
             .setTitle("Transfer $selectedCount file(s)")
-            .setMessage("Choose options for this transfer:")
             .setMultiChoiceItems(items, checked) { _, which, isChecked ->
                 checked[which] = isChecked
             }
