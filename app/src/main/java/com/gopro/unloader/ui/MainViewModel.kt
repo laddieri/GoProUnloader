@@ -286,7 +286,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 _phase.value = Phase.APPLYING_SETTING
-                log("Applying setting "$settingName" via Bluetooth…")
+                log("Applying setting '$settingName' via Bluetooth…")
                 val ble = GoProBleManager(context).also { bleMgr = it }
                 val ok = ble.sendSettingCommand(
                     settingId = settingId,
