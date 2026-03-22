@@ -511,11 +511,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         log("  Password: ${creds.password}")
         log("Waiting for connection…")
 
-        val connected = waitForCameraConnection()
+        // Re-bind to WiFi before each ping so Android doesn't route through
+        // mobile data (GoPro WiFi has no internet — Android won't use it by
+        // default, especially on subsequent connections to the same SSID).
+        val connected = waitForCameraConnection { bindToActiveWifiNetwork() }
         if (connected) {
-            // Bind OkHttp to the WiFi network so Android doesn't route traffic
-            // through mobile data (GoPro WiFi has no internet).
-            bindToActiveWifiNetwork()
             _wifiCredentials.postValue(null) // hide the credentials card
         }
         return connected
@@ -554,9 +554,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _wifiCredentials.postValue(null)
     }
 
-    private suspend fun waitForCameraConnection(): Boolean {
+    private suspend fun waitForCameraConnection(
+        beforeEachAttempt: () -> Unit = {}
+    ): Boolean {
         var attempts = 0
         while (attempts < 30) {
+            beforeEachAttempt()
             val reachable = withContext(Dispatchers.IO) { goProApi.isCameraReachable() }
             if (reachable) {
                 log("GoPro connected over WiFi.")
