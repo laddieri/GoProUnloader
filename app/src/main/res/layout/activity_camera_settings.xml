@@ -496,32 +496,6 @@
                     <View android:layout_width="match_parent" android:layout_height="1dp"
                         android:background="#1F000000" android:layout_marginStart="16dp" />
 
-                    <!-- GPS -->
-                    <LinearLayout
-                        android:id="@+id/row_gps"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:padding="16dp"
-                        android:background="?attr/selectableItemBackground"
-                        android:clickable="true"
-                        android:focusable="true">
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:text="GPS"
-                            android:textAppearance="?attr/textAppearanceBodyLarge" />
-                        <TextView
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:text="Off, On"
-                            android:textAppearance="?attr/textAppearanceBodySmall"
-                            android:textColor="?attr/colorOnSurfaceVariant" />
-                    </LinearLayout>
-
-                    <View android:layout_width="match_parent" android:layout_height="1dp"
-                        android:background="#1F000000" android:layout_marginStart="16dp" />
-
                     <!-- Quick Capture -->
                     <LinearLayout
                         android:id="@+id/row_quick_capture"

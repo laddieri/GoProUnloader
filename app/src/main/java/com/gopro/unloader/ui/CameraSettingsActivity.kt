@@ -25,9 +25,9 @@ class CameraSettingsActivity : AppCompatActivity() {
     private data class CameraSetting(val id: Int, val name: String, val options: List<SettingOption>)
     private data class PresetOption(val label: String, val cmd: ByteArray)
 
+    // Hero 11 Mini Black is video-only; no Photo mode
     private val recordingModePresets = listOf(
         PresetOption("Video",      GoProBleManager.PRESET_GROUP_VIDEO),
-        PresetOption("Photo",      GoProBleManager.PRESET_GROUP_PHOTO),
         PresetOption("Timelapse",  GoProBleManager.PRESET_GROUP_TIMELAPSE)
     )
 
@@ -138,10 +138,7 @@ class CameraSettingsActivity : AppCompatActivity() {
         SettingOption("50 Hz (PAL)", 1)
     ))
 
-    private val gpsSetting = CameraSetting(83, "GPS", listOf(
-        SettingOption("Off", 0),
-        SettingOption("On", 1)
-    ))
+    // Note: Hero 11 Mini Black has no GPS hardware; GPS setting omitted
 
     private val quickCaptureSetting = CameraSetting(24, "Quick Capture", listOf(
         SettingOption("Off", 0),
@@ -214,7 +211,6 @@ class CameraSettingsActivity : AppCompatActivity() {
         reg(beepsSetting,            binding.rowBeeps)
         reg(ledSetting,              binding.rowLeds)
         reg(antiFlickerSetting,      binding.rowAntiFlicker)
-        reg(gpsSetting,              binding.rowGps)
         reg(quickCaptureSetting,     binding.rowQuickCapture)
         reg(videoFormatSetting,      binding.rowVideoFormat)
     }
