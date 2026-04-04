@@ -332,7 +332,7 @@ def keepalive_worker(stop_event: threading.Event) -> None:
     """Ping the GoPro every 2.5 s to prevent it sleeping during transfers."""
     while not stop_event.is_set():
         try:
-            requests.get(f"{GOPRO_BASE}/gopro/camera/state", timeout=3)
+            requests.get(f"{GOPRO_BASE}/gopro/camera/keep_alive", timeout=3)
         except Exception:
             pass
         stop_event.wait(timeout=2.5)
