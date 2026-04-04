@@ -439,7 +439,7 @@ def parse_args() -> argparse.Namespace:
         "--list", "-l", action="store_true",
         help="List files on the GoPro without downloading",
     )
-parser.add_argument(
+    parser.add_argument(
         "--no-delete", action="store_true",
         help="Skip deleting files from the camera after downloading",
     )
