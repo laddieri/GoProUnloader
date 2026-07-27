@@ -17,7 +17,10 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
+from urllib.parse import quote
 
 import requests
 
@@ -543,22 +546,33 @@ def get_media_list(include_proxies: bool = True) -> list[dict]:
     return entries
 
 
+def media_query_url(base: str, path: str) -> str:
+    """
+    Build a `?path=100GOPRO/GX010042.MP4` URL with the slash left literal.
+
+    The camera's HTTP server does not decode `%2F` and answers HTTP 400 when
+    it sees one, so the path separator has to survive un-escaped. requests'
+    `params=` would percent-encode it, hence building the URL by hand.
+    """
+    return f"{base}?path={quote(path, safe='/')}"
+
+
 def _looks_like_jpeg(data: bytes | None) -> bool:
     """The camera answers 200 with a JSON error body on some failures."""
     return bool(data) and data[:2] == b"\xff\xd8"
 
 
-def _fetch_jpeg(url: str, params: dict | None = None, attempts: int = 2) -> bytes | None:
+def _fetch_jpeg(url: str, attempts: int = 2) -> bytes | None:
     """
     GET a JPEG from the camera, retrying once.
 
-    Returns None (and explains why at WARNING) rather than raising, so one
-    unhappy file never stops the rest of the grid loading.
+    Returns None (and records why) rather than raising, so one unhappy file
+    never stops the rest of the grid loading.
     """
     last = "no attempt made"
     for attempt in range(attempts):
         try:
-            r = requests.get(url, params=params, timeout=15)
+            r = requests.get(url, timeout=15)
             if r.status_code != 200:
                 last = f"HTTP {r.status_code}"
             elif not _looks_like_jpeg(r.content):
@@ -578,6 +592,68 @@ def _fetch_jpeg(url: str, params: dict | None = None, attempts: int = 2) -> byte
 _fetch_jpeg.last_error = ""
 
 
+def grab_frame(url: str, width: int = 320) -> bytes | None:
+    """
+    Pull a single JPEG frame out of a video stream with FFmpeg.
+
+    The last-resort thumbnail source, for cards that carry no .THM sidecars
+    and firmware whose thumbnail endpoints don't answer. Only worth pointing
+    at the small .LRV proxy: GoPro MP4s keep their moov atom at the end, so
+    seeking a full-resolution clip would drag the whole file down the wire.
+    """
+    if find_ffmpeg_tool("ffmpeg") is None:
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-loglevel", "error",
+                "-i", url,
+                "-frames:v", "1",
+                "-vf", f"scale={width}:-2",
+                "-f", "image2", "-c:v", "mjpeg",
+                "-",
+            ],
+            capture_output=True, timeout=40, **_no_window_kwargs(),
+        )
+        if result.returncode == 0 and _looks_like_jpeg(result.stdout):
+            return result.stdout
+        _fetch_jpeg.last_error = (
+            result.stderr.decode("utf-8", "replace").strip()[:80] or "ffmpeg failed"
+        )
+    except subprocess.TimeoutExpired:
+        _fetch_jpeg.last_error = "ffmpeg timed out"
+    except Exception as e:
+        _fetch_jpeg.last_error = f"{type(e).__name__}: {e}"
+    return None
+
+
+# Which thumbnail sources this camera actually honours. Learned from the first
+# few files so a card full of clips doesn't re-try dead endpoints every time.
+_GIVE_UP_AFTER = 3
+_source_failures: dict[str, int] = {}
+# Preference is tracked per size: the small grid thumbnail and the large
+# screennail come from different endpoints, so one must not reorder the other.
+_preferred_source: dict[bool, str | None] = {False: None, True: None}
+
+
+def reset_thumbnail_strategy() -> None:
+    """Forget what we learned - call when reconnecting to a camera."""
+    _source_failures.clear()
+    _preferred_source[False] = None
+    _preferred_source[True] = None
+
+
+def _order_sources(sources: list, large: bool) -> list:
+    """Put the last known-good source first and drop consistently dead ones."""
+    live = [s for s in sources if _source_failures.get(s[0], 0) < _GIVE_UP_AFTER]
+    if not live:                      # everything failed before; try anyway
+        live = sources
+    preferred = _preferred_source[large]
+    if preferred:
+        live.sort(key=lambda s: s[0] != preferred)
+    return live
+
+
 def get_thumbnail(file_info: dict, large: bool = False) -> bytes | None:
     """
     Fetch a JPEG preview frame for a file, trying every source the camera
@@ -591,27 +667,45 @@ def get_thumbnail(file_info: dict, large: bool = False) -> bytes | None:
     That is a plain JPEG served over the same file path as the downloads
     themselves, which makes it the most dependable source of the three.
     """
-    sources: list[tuple[str, str, dict | None]] = []
-    if large:
-        sources.append(("screennail endpoint", MEDIA_SCREENNAIL_URL,
-                        {"path": file_info["path"]}))
-    sources.append(("thumbnail endpoint", MEDIA_THUMBNAIL_URL,
-                    {"path": file_info["path"]}))
+    path = file_info["path"]
+    endpoints = [("screennail", MEDIA_SCREENNAIL_URL),
+                 ("thumbnail", MEDIA_THUMBNAIL_URL)]
     if not large:
-        sources.append(("screennail endpoint", MEDIA_SCREENNAIL_URL,
-                        {"path": file_info["path"]}))
+        endpoints.reverse()
+
+    sources: list[tuple[str, Callable[[], bytes | None]]] = []
+    for name, base in endpoints:
+        sources.append((f"{name} endpoint",
+                        partial(_fetch_jpeg, media_query_url(base, path))))
+    # Some firmware wants the DCIM prefix; try it before giving up on the API.
+    for name, base in endpoints:
+        sources.append((f"{name} endpoint (DCIM)",
+                        partial(_fetch_jpeg,
+                                media_query_url(base, f"DCIM/{path}"))))
     if file_info.get("thumb_url"):
-        sources.append((".THM sidecar", file_info["thumb_url"], None))
+        sources.append((".THM sidecar",
+                        partial(_fetch_jpeg, file_info["thumb_url"])))
+    if file_info.get("proxy_url"):
+        sources.append(("FFmpeg frame from .LRV",
+                        partial(grab_frame, file_info["proxy_url"],
+                                640 if large else 320)))
 
     failures = []
-    for label, url, params in sources:
-        data = _fetch_jpeg(url, params)
+    for label, fetch in _order_sources(sources, large):
+        data = fetch()
         if data is not None:
-            if failures:
-                log.info("  %s - thumbnail came from the %s (%s failed)",
-                         file_info["name"], label, ", ".join(failures))
+            if label != _preferred_source[large]:
+                log.info("  Using the %s for %s.", label,
+                         "previews" if large else "thumbnails")
+                _preferred_source[large] = label
+            _source_failures[label] = 0
             return data
         failures.append(f"{label}: {_fetch_jpeg.last_error}")
+        seen = _source_failures.get(label, 0) + 1
+        _source_failures[label] = seen
+        if seen == _GIVE_UP_AFTER:
+            log.warning("  Giving up on the %s (failed %d times: %s).",
+                        label, seen, _fetch_jpeg.last_error)
 
     log.warning("No thumbnail for %s. Tried %s.", file_info["name"],
                 "; ".join(failures))
@@ -676,18 +770,26 @@ def download_file(
 
 
 def delete_file(file_info: dict) -> bool:
-    """Delete a file from the GoPro. Tries two path formats for compatibility."""
+    """
+    Delete a file from the GoPro. Tries two path formats for compatibility.
+
+    The path goes on the URL with its slash left literal - a percent-encoded
+    one comes back as HTTP 400 from the camera.
+    """
     directory = file_info["directory"]
     filename  = file_info["name"]
+    last = ""
     for path in (f"{directory}/{filename}", f"DCIM/{directory}/{filename}"):
         try:
-            r = requests.get(MEDIA_DELETE_URL, params={"path": path}, timeout=10)
+            r = requests.get(media_query_url(MEDIA_DELETE_URL, path), timeout=10)
             if r.status_code == 200:
                 return True
+            last = f"HTTP {r.status_code}"
         except Exception as e:
             log.warning("  Could not delete %s from camera: %s", filename, e)
             return False
-    log.warning("  Delete failed for %s (tried multiple path formats)", filename)
+    log.warning("  Delete failed for %s (tried multiple path formats, last: %s)",
+                filename, last)
     return False
 
 

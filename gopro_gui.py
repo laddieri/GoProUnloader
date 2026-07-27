@@ -492,6 +492,7 @@ class GoProApp:
     def _on_connected(self) -> None:
         """Shared tail of both connection paths, called from a worker thread."""
         self._keepalive.start()
+        core.reset_thumbnail_strategy()
         battery = core.get_battery_percent()
         self._conn_label = (
             "Connected" + (f"   Battery {battery}%" if battery is not None else "")

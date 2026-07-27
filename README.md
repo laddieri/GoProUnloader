@@ -180,18 +180,25 @@ Uses `bleak` to scan for a device whose name starts with `"GoPro"`, connects, an
 Polls `http://10.5.5.9:8080/gopro/media/list` until the camera's HTTP server responds, then iterates over the media and streams each file down in 64 KiB chunks. A background thread pings `/gopro/camera/keep_alive` every 2.5 s so the camera doesn't sleep part-way through.
 
 ### 3. Thumbnails and Preview (GUI)
-Tiles try three sources in order and use the first that returns a real JPEG:
+Tiles try each source in turn and use the first that returns a real JPEG:
 
 1. `/gopro/media/thumbnail?path=…` — the documented endpoint
 2. `/gopro/media/screennail?path=…` — larger frame, also used for the sidebar
-3. the `.THM` sidecar the camera writes next to every clip, fetched over the
-   same `/videos/DCIM/…` path as the downloads
+3. the same two with a `DCIM/` prefix, which some firmware wants
+4. the `.THM` sidecar next to the clip, over the same `/videos/DCIM/…` path
+   as the downloads
+5. a frame decoded out of the `.LRV` proxy with FFmpeg
 
-The `.THM` fallback matters because the endpoints aren't reliable on every
-firmware, while the sidecar is just a JPEG on the card. Requests go out **one
-at a time** — the camera's HTTP server drops parallel requests, which shows up
-as tiles that never load. Responses are checked for a real JPEG header, since
-the camera sometimes answers `200` with a JSON error body.
+**The path's `/` must not be percent-encoded.** The camera's HTTP server does
+not decode `%2F` and answers `HTTP 400`, so these URLs are built by hand
+rather than through requests' `params=`, which would escape it. The same
+applies to `media/delete/file`.
+
+Requests go out **one at a time** — the camera drops parallel requests, which
+shows up as tiles that never load. Responses are checked for a real JPEG
+header, since the camera sometimes answers `200` with a JSON error body. After
+a source fails three times it stops being tried, so a card full of clips
+doesn't re-probe a dead endpoint for every file.
 
 Preview hands `ffplay` the URL of the clip's `.LRV` proxy so playback streams
 off the camera with nothing written to disk.
