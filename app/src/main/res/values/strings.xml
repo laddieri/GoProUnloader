@@ -33,4 +33,18 @@
     <string name="hint_wake_camera">Uses Bluetooth to wake the camera and check battery and storage</string>
     <string name="hint_ble_controls">Uses Bluetooth \u2014 no WiFi needed</string>
     <string name="hint_wifi_files">Requires switching your phone\u2019s WiFi to the GoPro network</string>
+
+    <!-- Thumbnails -->
+    <string name="thumb_loading">\u2026</string>
+    <string name="thumb_none">no\npreview</string>
+    <string name="thumb_description">Preview frame from the camera</string>
+
+    <!-- Options -->
+    <string name="options_title">Offload Options</string>
+    <string name="options_remembered">These choices are remembered.</string>
+    <string name="opt_transcode">Transcode videos to 1080p</string>
+    <string name="opt_keep_originals">Also keep the full-size original</string>
+    <string name="opt_delete_from_camera">Delete from camera after copying</string>
+    <string name="opt_skip_existing">Skip files already downloaded</string>
+    <string name="opt_ble_address">Set camera BLE address\u2026</string>
 </resources>

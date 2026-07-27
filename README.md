@@ -302,28 +302,45 @@ offload workflow as the Python script, optimised for phones and tablets.
 
 ### Usage
 
-1. Tap **Start Offload** — the app will:
-   - Scan for a nearby GoPro via Bluetooth LE and wake its WiFi AP.
-   - Display the WiFi SSID and password on-screen.
-   - Wait while you connect your phone to the GoPro's WiFi hotspot.
-   - Download all new MP4 files with a per-file progress bar.
-   - Delete downloaded files from the camera (unless **Don't delete** is checked).
-   - Transcode each video to 1080p H.264/AAC using FFmpeg Kit.
-2. Tap **List Files** to browse camera contents without downloading.
-3. Tap the **⋮ Options** menu to toggle:
-   - *Skip BLE* — if WiFi is already connected
-   - *Keep originals* — retain raw downloads alongside 1080p copies
-   - *Don't delete* — leave files on the camera
-   - *Skip transcoding* — save raw downloads only
-   - *Set BLE Address* — skip scanning if the camera's BLE address is known
+1. Tap **Wake Camera** to wake it over Bluetooth and read its battery and
+   storage.
+2. Tap **Browse & Transfer Files**. The app shows the WiFi SSID and password
+   and opens WiFi settings so you can join the camera's hotspot, then lists
+   what's on the card.
+3. Each row carries a **thumbnail** pulled from the camera, with the filename,
+   size and duration. Tick the ones you want and tap **Transfer Selected** —
+   the confirmation summarises what's about to happen.
+
+### Options
+
+The **⋮ Options** menu holds the offload settings, and they are **remembered
+between launches**:
+
+| Option | Effect |
+|---|---|
+| Transcode videos to 1080p | Off copies the originals across untouched |
+| Also keep the full-size original | Keeps the original beside the 1080p copy; off removes it once the copy is written |
+| Delete from camera after copying | Only deletes files that copied successfully, and takes the `.LRV`/`.THM` sidecars with them |
+| Skip files already downloaded | Off re-downloads everything |
+| Set camera BLE address | Skip scanning when the address is known |
+
+Thumbnails come from the same sources the desktop app uses — the thumbnail and
+screennail endpoints, then the `.THM` sidecar — fetched one at a time because
+the camera drops parallel requests, and cached so scrolling doesn't refetch.
+
+The `.LRV`/`.THM` sidecars are hidden from the list; they're handled with the
+clip they belong to.
 
 ### Output Structure
 
 ```
 Android/data/com.gopro.unloader/files/Movies/GoProUnloader/
-├── raw/          # Downloaded originals (removed after transcode unless --keep-originals)
+├── raw/          # Downloaded originals (removed after transcode unless
+│                 # "Also keep the full-size original" is on)
 └── transcoded/   # 1080p H.264/AAC MP4 files
 ```
+
+Finished videos are published to the gallery under `Movies/GoProUnloader`.
 
 ---
 
