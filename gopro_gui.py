@@ -68,8 +68,10 @@ def make_photo(data: bytes, max_w: int, max_h: int):
             image = Image.open(io.BytesIO(data))
             image.thumbnail((max_w, max_h))
             return ImageTk.PhotoImage(image)
-        except Exception:
-            return None
+        except Exception as e:
+            # Don't give up: a packaged build can end up with Pillow importable
+            # but its format plugins missing, and FFmpeg can still do the job.
+            log.debug("Pillow could not decode the thumbnail (%s); using FFmpeg.", e)
     png = core.jpeg_to_png(data, max_w, max_h)
     if png is None:
         return None
@@ -111,11 +113,17 @@ class MediaCard(ttk.Frame):
         self._photo    = None  # keep a reference or Tk garbage-collects it
         self.thumb_bytes: bytes | None = None
 
+        # tk.Label sizes in characters/lines until it holds an image, so a
+        # width/height here would blow the tile up to a few thousand pixels
+        # whenever a thumbnail is missing. Fix the size on a container instead.
+        box = tk.Frame(self, width=THUMB_W, height=THUMB_H, bg=BG_CARD)
+        box.pack()
+        box.pack_propagate(False)
         self.thumb = tk.Label(
-            self, width=THUMB_W, height=THUMB_H,
-            bg=BG_CARD, fg=FG_DIM, text="loading...", compound="center",
+            box, bg=BG_CARD, fg=FG_DIM, text="loading...", compound="center",
+            wraplength=THUMB_W - 8,
         )
-        self.thumb.pack()
+        self.thumb.pack(fill="both", expand=True)
 
         name = file_info["name"]
         ttk.Label(self, text=name, style="CardName.TLabel").pack(anchor="w", pady=(4, 0))
@@ -335,11 +343,14 @@ class GoProApp:
         side.pack_propagate(False)
 
         ttk.Label(side, text="Preview", style="Heading.TLabel").pack(anchor="w")
+        detail_box = tk.Frame(side, height=180, bg=BG_CARD)
+        detail_box.pack(fill="x", pady=(6, 4))
+        detail_box.pack_propagate(False)
         self.detail_thumb = tk.Label(
-            side, bg=BG_CARD, fg=FG_DIM, width=260, height=160,
-            text="Select a file", compound="center",
+            detail_box, bg=BG_CARD, fg=FG_DIM,
+            text="Select a file", compound="center", wraplength=250,
         )
-        self.detail_thumb.pack(fill="x", pady=(6, 4))
+        self.detail_thumb.pack(fill="both", expand=True)
         self.detail_name = ttk.Label(side, text="", style="Panel.TLabel",
                                      wraplength=260, justify="left")
         self.detail_name.pack(anchor="w")
@@ -970,11 +981,22 @@ class GoProApp:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(message)s",
-                        datefmt="%H:%M:%S")
+    if sys.stderr is not None:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(message)s",
+                            datefmt="%H:%M:%S")
+    else:
+        # A windowed .exe has no stderr: logging's fallback handler would try
+        # to write to it and raise. Give the root logger somewhere safe to go
+        # (the window's own log pane has its own handler).
+        logging.getLogger().addHandler(logging.NullHandler())
+        logging.raiseExceptions = False
+
     root = tk.Tk()
-    GoProApp(root)
-    root.mainloop()
+    app = GoProApp(root)
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        app.on_close()
 
 
 if __name__ == "__main__":

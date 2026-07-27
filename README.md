@@ -225,6 +225,47 @@ Calls FFmpeg with:
 
 ---
 
+## Building a Windows .exe
+
+No Python installation needed on the machine that runs it.
+
+**From CI (easiest):** the *Build Windows executable* workflow builds it on a
+Windows runner. Run it from the **Actions** tab and download the
+`GoProUnloader-windows` artifact, or push a `v*` tag to publish it as a
+release asset.
+
+**Locally, on Windows:**
+
+```bat
+build_windows.bat
+```
+
+or by hand:
+
+```bat
+pip install -r requirements.txt pyinstaller
+pyinstaller GoProUnloader.spec
+```
+
+Either way you get `dist\GoProUnloader\`:
+
+| File | What it is |
+|---|---|
+| `GoProUnloader.exe` | The offload window. No console window behind it |
+| `gopro-unloader-cli.exe` | The command-line tool, same flags as the script |
+| `gopro-diag.exe` | Thumbnail diagnostics |
+
+**FFmpeg is not bundled** — it is large and separately licensed. The app looks
+for `ffmpeg`/`ffprobe`/`ffplay` next to the `.exe`, then in an `ffmpeg`
+subfolder, then on `PATH`. So either keep FFmpeg installed normally, or copy
+those three binaries into `dist\GoProUnloader\` to get a folder you can move
+to another machine as-is.
+
+Preferences still live in `%APPDATA%\GoProUnloader\settings.json`, so they
+survive replacing the build with a newer one.
+
+---
+
 ## Diagnostics
 
 ```bash
