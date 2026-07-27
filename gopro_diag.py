@@ -43,10 +43,10 @@ def probe(label: str, url: str, params: dict | None = None) -> bool:
         elapsed = time.monotonic() - start
         ok = r.status_code == 200 and r.content[:2] == b"\xff\xd8"
         mark = "OK  " if ok else "FAIL"
-        print(f"    [{mark}] {label:<22} {describe(r)}  ({elapsed:.1f}s)")
+        print(f"    [{mark}] {label:<26} {describe(r)}  ({elapsed:.1f}s)")
         return ok
     except Exception as e:
-        print(f"    [FAIL] {label:<22} {type(e).__name__}: {e}")
+        print(f"    [FAIL] {label:<26} {type(e).__name__}: {e}")
         return False
 
 
@@ -89,22 +89,53 @@ def main() -> None:
     print("Probing each thumbnail source, one request at a time")
     print("-" * 68)
 
-    tally = {"thumbnail endpoint": 0, "screennail endpoint": 0, ".THM sidecar": 0}
+    tally = {
+        "thumbnail (literal /)"  : 0,
+        "screennail (literal /)" : 0,
+        "thumbnail (%2F encoded)": 0,
+        "thumbnail (DCIM prefix)": 0,
+        ".THM sidecar"           : 0,
+        "FFmpeg frame from .LRV" : 0,
+    }
     for f in media[:args.count]:
         print(f"\n  {f['name']}   (path={f['path']})")
-        if probe("thumbnail endpoint", core.MEDIA_THUMBNAIL_URL, {"path": f["path"]}):
-            tally["thumbnail endpoint"] += 1
-        if probe("screennail endpoint", core.MEDIA_SCREENNAIL_URL, {"path": f["path"]}):
-            tally["screennail endpoint"] += 1
+
+        # The literal-slash form is what the docs show and what the app uses.
+        if probe("thumbnail (literal /)",
+                 core.media_query_url(core.MEDIA_THUMBNAIL_URL, f["path"])):
+            tally["thumbnail (literal /)"] += 1
+        if probe("screennail (literal /)",
+                 core.media_query_url(core.MEDIA_SCREENNAIL_URL, f["path"])):
+            tally["screennail (literal /)"] += 1
+
+        # requests' default encoding, which the camera answers with HTTP 400.
+        if probe("thumbnail (%2F encoded)", core.MEDIA_THUMBNAIL_URL,
+                 {"path": f["path"]}):
+            tally["thumbnail (%2F encoded)"] += 1
+
+        if probe("thumbnail (DCIM prefix)",
+                 core.media_query_url(core.MEDIA_THUMBNAIL_URL, f"DCIM/{f['path']}")):
+            tally["thumbnail (DCIM prefix)"] += 1
+
         if f.get("thumb_url"):
             if probe(".THM sidecar", f["thumb_url"]):
                 tally[".THM sidecar"] += 1
         else:
-            print("    [SKIP] .THM sidecar          no .THM for this file")
+            print("    [SKIP] .THM sidecar              no .THM listed for this file")
 
-        # Some firmwares only accept the DCIM-prefixed form.
-        probe("thumbnail w/ DCIM", core.MEDIA_THUMBNAIL_URL,
-              {"path": f"DCIM/{f['path']}"})
+        if f.get("proxy_url"):
+            start = time.monotonic()
+            data = core.grab_frame(f["proxy_url"])
+            elapsed = time.monotonic() - start
+            if data:
+                tally["FFmpeg frame from .LRV"] += 1
+                print(f"    [OK  ] {'FFmpeg frame from .LRV':<26} "
+                      f"JPEG, {len(data)} bytes  ({elapsed:.1f}s)")
+            else:
+                print(f"    [FAIL] {'FFmpeg frame from .LRV':<26} "
+                      f"no frame decoded  ({elapsed:.1f}s)")
+        else:
+            print("    [SKIP] FFmpeg frame from .LRV    no .LRV proxy for this file")
 
     print("\n" + "-" * 68)
     print("Concurrency check (4 parallel thumbnail requests)")
