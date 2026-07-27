@@ -104,12 +104,22 @@ python gopro_gui.py
 
 **Options** (all in the sidebar, applied when you hit Download)
 - **Copy files to** — pick any destination folder.
-- **Transcode to 1080p** — on by default; **Keep original files** decides
-  whether the raw download survives the transcode.
+- **Transcode to 1080p** — turn it off to just copy the originals across.
+- **Also keep the full-size original** — with transcoding on, keeps the
+  untouched original in `raw/` alongside the 1080p copy in `transcoded/`.
+  Off means the original is removed once its 1080p copy is written.
 - **Delete from camera after copying** — asks for confirmation first, and only
   ever deletes files that downloaded successfully. Deleting a clip also removes
   its `.LRV`/`.THM` siblings, so the card actually frees up.
 - **Skip files already downloaded** — makes re-runs resume instead of refetch.
+- **Join camera Wi-Fi automatically** (Windows) — when the Bluetooth step has
+  read the credentials, switch the adapter over without waiting for a click.
+
+Every one of these, including the destination folder, is **remembered between
+runs**. They're stored as JSON in `%APPDATA%\GoProUnloader\settings.json`
+(`~/.config/gopro-unloader/settings.json` elsewhere); delete that file to go
+back to defaults. A damaged or hand-edited file falls back to defaults rather
+than failing to start.
 
 **During a transfer** a progress bar tracks the whole run file by file, **Stop**
 cancels cleanly (partial files are removed), and the log pane at the bottom

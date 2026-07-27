@@ -28,6 +28,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import gopro_core as core
+import gopro_settings
 
 try:
     from PIL import Image, ImageTk
@@ -178,12 +179,15 @@ class GoProApp:
         self.password: str | None = None
         self.detail_photo = None
         self._conn_label = "Connected"
+        self._auto_join_enabled = False
 
-        self.output_dir   = tk.StringVar(value=str(DEFAULT_OUTPUT))
-        self.opt_transcode = tk.BooleanVar(value=True)
-        self.opt_delete    = tk.BooleanVar(value=True)
-        self.opt_keep_raw  = tk.BooleanVar(value=False)
-        self.opt_skip_existing = tk.BooleanVar(value=True)
+        saved = gopro_settings.load()
+        self.output_dir        = tk.StringVar(value=saved["output_dir"])
+        self.opt_transcode     = tk.BooleanVar(value=saved["transcode"])
+        self.opt_delete        = tk.BooleanVar(value=saved["delete_from_cam"])
+        self.opt_keep_raw      = tk.BooleanVar(value=saved["keep_originals"])
+        self.opt_skip_existing = tk.BooleanVar(value=saved["skip_existing"])
+        self.opt_auto_join     = tk.BooleanVar(value=saved["auto_join_wifi"])
         self.status_text  = tk.StringVar(value="Not connected")
         self.progress_text = tk.StringVar(value="")
         self.selection_text = tk.StringVar(value="Nothing selected")
@@ -191,6 +195,7 @@ class GoProApp:
         self._build_styles()
         self._build_layout()
         self._install_log_handler()
+        self._watch_settings()
 
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         root.after(50, self._pump)
@@ -325,7 +330,7 @@ class GoProApp:
         self.empty_label.grid(row=0, column=0, padx=20, pady=20)
 
     def _build_sidebar(self, parent) -> None:
-        side = ttk.Frame(parent, style="Panel.TFrame", padding=12, width=300)
+        side = ttk.Frame(parent, style="Panel.TFrame", padding=12, width=330)
         side.pack(side="right", fill="y", padx=(10, 0))
         side.pack_propagate(False)
 
@@ -348,7 +353,10 @@ class GoProApp:
 
         ttk.Separator(side, orient="horizontal").pack(fill="x", pady=12)
 
-        ttk.Label(side, text="Options", style="Heading.TLabel").pack(anchor="w")
+        opt_head = ttk.Frame(side, style="Panel.TFrame")
+        opt_head.pack(fill="x")
+        ttk.Label(opt_head, text="Options", style="Heading.TLabel").pack(side="left")
+        ttk.Label(opt_head, text="remembered", style="Dim.TLabel").pack(side="right")
         ttk.Label(side, text="Copy files to", style="Dim.TLabel").pack(
             anchor="w", pady=(6, 2)
         )
@@ -364,13 +372,24 @@ class GoProApp:
         ttk.Checkbutton(side, text="Transcode to 1080p", variable=self.opt_transcode,
                         command=self._sync_option_states).pack(anchor="w", pady=(10, 0))
         self.chk_keep = ttk.Checkbutton(
-            side, text="Keep original files", variable=self.opt_keep_raw,
+            side, text="Also keep the full-size original",
+            variable=self.opt_keep_raw,
         )
         self.chk_keep.pack(anchor="w", padx=(18, 0))
         ttk.Checkbutton(side, text="Delete from camera after copying",
                         variable=self.opt_delete).pack(anchor="w", pady=(6, 0))
         ttk.Checkbutton(side, text="Skip files already downloaded",
                         variable=self.opt_skip_existing).pack(anchor="w", pady=(6, 0))
+
+        label = "Join camera Wi-Fi automatically"
+        if sys.platform != "win32":
+            label += " (Windows)"
+        self.chk_auto_join = ttk.Checkbutton(
+            side, text=label, variable=self.opt_auto_join,
+        )
+        self.chk_auto_join.pack(anchor="w", pady=(6, 0))
+        if sys.platform != "win32":
+            self.chk_auto_join.configure(state="disabled")
 
         self._sync_option_states()
 
@@ -475,6 +494,10 @@ class GoProApp:
         self._cancel.clear()
         self._set_busy(True)
         self._set_status("Waking camera over Bluetooth...")
+        # Read the Tk variable here: the worker thread must not touch it.
+        self._auto_join_enabled = (
+            self.opt_auto_join.get() and sys.platform == "win32"
+        )
         self._run_worker(self._ble_worker)
 
     def _ble_worker(self) -> None:
@@ -496,6 +519,9 @@ class GoProApp:
         self.ssid, self.password = ssid, password
         self._post(self._show_wifi_banner, ssid, password)
         self._post(self._set_status, f"Waiting for Wi-Fi: {ssid}")
+        if self._auto_join_enabled:
+            log.info("Joining %s automatically...", ssid)
+            self._auto_join_worker(ssid, password)
         self._run_worker(self._wait_for_wifi_worker)
 
     def _wait_for_wifi_worker(self) -> None:
@@ -735,6 +761,27 @@ class GoProApp:
             state="normal" if self.opt_transcode.get() else "disabled"
         )
 
+    # -- persisted preferences --------------------------------------------
+
+    def _settings_values(self) -> dict:
+        return {
+            "output_dir"     : self.output_dir.get(),
+            "transcode"      : self.opt_transcode.get(),
+            "keep_originals" : self.opt_keep_raw.get(),
+            "delete_from_cam": self.opt_delete.get(),
+            "skip_existing"  : self.opt_skip_existing.get(),
+            "auto_join_wifi" : self.opt_auto_join.get(),
+        }
+
+    def _watch_settings(self) -> None:
+        """Save preferences whenever one of them changes."""
+        for var in (self.output_dir, self.opt_transcode, self.opt_delete,
+                    self.opt_keep_raw, self.opt_skip_existing, self.opt_auto_join):
+            var.trace_add("write", lambda *_: self.save_settings())
+
+    def save_settings(self) -> None:
+        gopro_settings.save(self._settings_values())
+
     def _snapshot_options(self) -> dict:
         """
         Read the option widgets into a plain dict on the main thread.
@@ -912,6 +959,7 @@ class GoProApp:
             "Still working", "A transfer is running. Quit anyway?"
         ):
             return
+        self.save_settings()
         self._cancel.set()
         for proc in self._preview_procs:
             if proc.poll() is None:
