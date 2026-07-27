@@ -509,20 +509,33 @@ def get_media_list(include_proxies: bool = True) -> list[dict]:
                 "kind"     : kind,
                 "duration" : duration,
                 "proxy_url": None,
+                "thumb_url": None,
             })
 
-    # Pair each video with its low-res proxy so previews stream instantly.
-    proxies = {
-        _clip_id(e["name"]): e
-        for e in entries
-        if e["kind"] == "proxy" and _clip_id(e["name"])
-    }
-    for entry in entries:
-        if entry["kind"] != "video":
+    # Pair each clip with the sidecar files the camera writes next to it: the
+    # .LRV proxy (instant preview) and the .THM thumbnail (a plain JPEG, and a
+    # dependable fallback when the thumbnail endpoint won't play ball).
+    proxies = {}
+    thumbs  = {}
+    for e in entries:
+        clip = _clip_id(e["name"])
+        if clip is None:
             continue
-        proxy = proxies.get(_clip_id(entry["name"]) or "")
+        if e["kind"] == "proxy":
+            proxies[clip] = e
+        elif e["kind"] == "thumb":
+            thumbs[clip] = e
+
+    for entry in entries:
+        if entry["kind"] not in ("video", "photo"):
+            continue
+        clip = _clip_id(entry["name"]) or ""
+        proxy = proxies.get(clip)
+        thumb = thumbs.get(clip)
         if proxy is not None:
             entry["proxy_url"] = proxy["url"]
+        if thumb is not None:
+            entry["thumb_url"] = thumb["url"]
 
     if not include_proxies:
         entries = [e for e in entries if e["kind"] in ("video", "photo")]
@@ -530,21 +543,79 @@ def get_media_list(include_proxies: bool = True) -> list[dict]:
     return entries
 
 
+def _looks_like_jpeg(data: bytes | None) -> bool:
+    """The camera answers 200 with a JSON error body on some failures."""
+    return bool(data) and data[:2] == b"\xff\xd8"
+
+
+def _fetch_jpeg(url: str, params: dict | None = None, attempts: int = 2) -> bytes | None:
+    """
+    GET a JPEG from the camera, retrying once.
+
+    Returns None (and explains why at WARNING) rather than raising, so one
+    unhappy file never stops the rest of the grid loading.
+    """
+    last = "no attempt made"
+    for attempt in range(attempts):
+        try:
+            r = requests.get(url, params=params, timeout=15)
+            if r.status_code != 200:
+                last = f"HTTP {r.status_code}"
+            elif not _looks_like_jpeg(r.content):
+                head = r.content[:60].decode("utf-8", "replace").strip()
+                last = f"not a JPEG (got {len(r.content)} bytes: {head!r})"
+            else:
+                return r.content
+        except Exception as e:
+            last = f"{type(e).__name__}: {e}"
+        if attempt + 1 < attempts:
+            time.sleep(0.4)
+    log.debug("  thumbnail source failed (%s): %s", url, last)
+    _fetch_jpeg.last_error = last
+    return None
+
+
+_fetch_jpeg.last_error = ""
+
+
 def get_thumbnail(file_info: dict, large: bool = False) -> bytes | None:
     """
-    Fetch a JPEG preview frame for a file straight from the camera.
+    Fetch a JPEG preview frame for a file, trying every source the camera
+    offers and falling back through them in order.
 
-    large=False returns the small grid thumbnail; large=True returns the
-    higher-resolution "screennail" used for the preview pane.
+    large=False wants the small grid thumbnail; large=True prefers the
+    higher-resolution "screennail" for the preview pane.
+
+    Not every camera/firmware serves the thumbnail endpoints reliably, so if
+    they fail we fetch the .THM sidecar the camera writes next to each clip.
+    That is a plain JPEG served over the same file path as the downloads
+    themselves, which makes it the most dependable source of the three.
     """
-    url = MEDIA_SCREENNAIL_URL if large else MEDIA_THUMBNAIL_URL
-    try:
-        r = requests.get(url, params={"path": file_info["path"]}, timeout=15)
-        r.raise_for_status()
-        return r.content
-    except Exception as e:
-        log.debug("No thumbnail for %s: %s", file_info["name"], e)
-        return None
+    sources: list[tuple[str, str, dict | None]] = []
+    if large:
+        sources.append(("screennail endpoint", MEDIA_SCREENNAIL_URL,
+                        {"path": file_info["path"]}))
+    sources.append(("thumbnail endpoint", MEDIA_THUMBNAIL_URL,
+                    {"path": file_info["path"]}))
+    if not large:
+        sources.append(("screennail endpoint", MEDIA_SCREENNAIL_URL,
+                        {"path": file_info["path"]}))
+    if file_info.get("thumb_url"):
+        sources.append((".THM sidecar", file_info["thumb_url"], None))
+
+    failures = []
+    for label, url, params in sources:
+        data = _fetch_jpeg(url, params)
+        if data is not None:
+            if failures:
+                log.info("  %s - thumbnail came from the %s (%s failed)",
+                         file_info["name"], label, ", ".join(failures))
+            return data
+        failures.append(f"{label}: {_fetch_jpeg.last_error}")
+
+    log.warning("No thumbnail for %s. Tried %s.", file_info["name"],
+                "; ".join(failures))
+    return None
 
 
 def preview_url(file_info: dict) -> str:

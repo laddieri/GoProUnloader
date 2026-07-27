@@ -180,7 +180,21 @@ Uses `bleak` to scan for a device whose name starts with `"GoPro"`, connects, an
 Polls `http://10.5.5.9:8080/gopro/media/list` until the camera's HTTP server responds, then iterates over the media and streams each file down in 64 KiB chunks. A background thread pings `/gopro/camera/keep_alive` every 2.5 s so the camera doesn't sleep part-way through.
 
 ### 3. Thumbnails and Preview (GUI)
-Grid tiles come from `/gopro/media/thumbnail?path=…` and the larger sidebar frame from `/gopro/media/screennail?path=…`. Preview hands `ffplay` the URL of the clip's `.LRV` proxy so playback streams off the camera with nothing written to disk.
+Tiles try three sources in order and use the first that returns a real JPEG:
+
+1. `/gopro/media/thumbnail?path=…` — the documented endpoint
+2. `/gopro/media/screennail?path=…` — larger frame, also used for the sidebar
+3. the `.THM` sidecar the camera writes next to every clip, fetched over the
+   same `/videos/DCIM/…` path as the downloads
+
+The `.THM` fallback matters because the endpoints aren't reliable on every
+firmware, while the sidecar is just a JPEG on the card. Requests go out **one
+at a time** — the camera's HTTP server drops parallel requests, which shows up
+as tiles that never load. Responses are checked for a real JPEG header, since
+the camera sometimes answers `200` with a JSON error body.
+
+Preview hands `ffplay` the URL of the clip's `.LRV` proxy so playback streams
+off the camera with nothing written to disk.
 
 ### 4. Delete from Camera
 Sends `DELETE http://10.5.5.9:8080/gopro/media/delete/file?path=<folder>/<name>` for each successfully downloaded file, plus the matching `.LRV` and `.THM` the camera stores beside it.
@@ -191,6 +205,19 @@ Calls FFmpeg with:
 - Scaling: letterbox/pillarbox to exactly `1920×1080`
 - Audio: `aac` at 192 kbps
 - Container flag: `+faststart` for streaming-friendly output
+
+---
+
+## Diagnostics
+
+```bash
+python gopro_diag.py          # connect to the camera's WiFi first
+```
+
+Probes every thumbnail source against the first few files on the card and
+prints exactly what the camera returned — status code, content type, and
+whether the body was really a JPEG — then checks whether the camera tolerates
+parallel requests. Use it if the grid comes up without thumbnails.
 
 ---
 
@@ -250,7 +277,7 @@ Android/data/com.gopro.unloader/files/Movies/GoProUnloader/
 | WiFi not reachable | Connect your computer/phone to the GoPro WiFi AP first |
 | `ffmpeg not found` | Install FFmpeg and ensure it is on your `PATH` (Python) |
 | GUI: `No module named 'tkinter'` | Re-run the python.org installer and tick **tcl/tk and IDLE** |
-| GUI: tiles say "no preview" | The camera has no thumbnail for that file; the download still works |
+| GUI: tiles say "no preview" | Run `python gopro_diag.py` — it reports which thumbnail source your camera actually serves. The log pane also names the failure per file. Downloads work regardless |
 | GUI: **Play preview** does nothing | `ffplay` isn't on `PATH` — it's part of the full FFmpeg build, not the "essentials" one |
 | GUI: **Join automatically** fails | Windows-only, and some adapters refuse it; connect from the WiFi menu instead |
 | Download fails mid-way | Re-run the script/app; already-deleted files are gone but untouched files can be retried |

@@ -75,6 +75,7 @@ class MediaCard(ttk.Frame):
         self.app       = app
         self.selected  = tk.BooleanVar(value=file_info["kind"] == "video")
         self._photo    = None  # keep a reference or Tk garbage-collects it
+        self.thumb_bytes: bytes | None = None
 
         self.thumb = tk.Label(
             self, width=THUMB_W, height=THUMB_H,
@@ -107,6 +108,7 @@ class MediaCard(ttk.Frame):
             widget.bind("<Double-Button-1>", lambda e: app.preview(file_info))
 
     def set_thumbnail(self, data: bytes | None) -> None:
+        self.thumb_bytes = data
         if not data or not HAVE_PILLOW:
             self.thumb.configure(
                 text="no preview" if not data else "install Pillow\nfor thumbnails"
@@ -134,7 +136,10 @@ class GoProApp:
         root.configure(bg=BG)
 
         self._ui_queue: queue.Queue = queue.Queue()
-        self._thumb_pool = ThreadPoolExecutor(max_workers=4)
+        # One worker on purpose: the camera's HTTP server is easily overwhelmed
+        # by parallel requests and starts refusing them, which shows up as
+        # thumbnails that never load.
+        self._thumb_pool = ThreadPoolExecutor(max_workers=1)
         self._cancel     = threading.Event()
         self._busy       = False
         self._keepalive  = core.KeepAlive()
@@ -624,18 +629,34 @@ class GoProApp:
         self.btn_preview.configure(
             state="normal" if file_info["kind"] == "video" else "disabled"
         )
-        self.detail_thumb.configure(text="loading...", image="")
+
+        # Show the grid thumbnail straight away so the pane never sits empty,
+        # then queue the sharper screennail behind whatever else is loading.
+        card = next((c for c in self.cards if c.file_info is file_info), None)
+        if card is not None and card.thumb_bytes:
+            self._render_detail(card.thumb_bytes)
+        else:
+            self.detail_photo = None
+            self.detail_thumb.configure(text="loading...", image="")
         self._thumb_pool.submit(self._fetch_detail_thumb, file_info)
 
     def _fetch_detail_thumb(self, file_info: dict) -> None:
-        data = core.get_thumbnail(file_info, large=True) or core.get_thumbnail(file_info)
+        data = core.get_thumbnail(file_info, large=True)
         self._post(self._apply_detail_thumb, file_info, data)
 
     def _apply_detail_thumb(self, file_info: dict, data: bytes | None) -> None:
         if getattr(self, "current", None) is not file_info:
             return  # selection moved on while we were fetching
-        if not data or not HAVE_PILLOW:
-            self.detail_thumb.configure(text="no preview available", image="")
+        if data is None:
+            # Leave whatever the grid thumbnail already put there.
+            if self.detail_photo is None:
+                self.detail_thumb.configure(text="no preview available", image="")
+            return
+        self._render_detail(data)
+
+    def _render_detail(self, data: bytes) -> None:
+        if not HAVE_PILLOW:
+            self.detail_thumb.configure(text="install Pillow for previews", image="")
             return
         try:
             image = Image.open(io.BytesIO(data))
@@ -643,6 +664,7 @@ class GoProApp:
             self.detail_photo = ImageTk.PhotoImage(image)
             self.detail_thumb.configure(image=self.detail_photo, text="")
         except Exception:
+            self.detail_photo = None
             self.detail_thumb.configure(text="no preview available", image="")
 
     def preview_current(self) -> None:
