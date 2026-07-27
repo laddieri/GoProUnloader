@@ -16,6 +16,7 @@ A **Python script** and **Android app** that automate the full offload workflow 
 | Python 3.11+ | Runtime |
 | [`bleak`](https://github.com/hbldh/bleak) | Bluetooth LE communication |
 | [`requests`](https://docs.python-requests.org/) | HTTP downloads & GoPro API |
+| [`tqdm`](https://github.com/tqdm/tqdm) | Download & transcode progress bars |
 | [`ffmpeg`](https://ffmpeg.org/) | Video transcoding (must be on `PATH`) |
 
 ### Install Python dependencies
@@ -60,11 +61,17 @@ python gopro_unloader.py [OPTIONS]
 
 | Flag | Default | Description |
 |---|---|---|
-| `--output-dir`, `-o` | `./gopro_output` | Directory for downloaded and transcoded files |
-| `--keep-originals` | off | Keep raw downloaded files alongside transcoded versions |
+| `--output-dir`, `-o` | `F:/gopro` | Directory for downloaded and transcoded files |
+| `--keep-originals` | off | Keep raw downloaded files alongside transcoded versions (skips the interactive prompt) |
 | `--no-delete` | off | Download videos but do **not** delete them from the camera |
-| `--skip-ble` | off | Skip Bluetooth wake (camera is already awake) |
+| `--no-transcode` | off | Skip the FFmpeg transcoding step entirely |
+| `--all`, `-a` | off | Re-download every file, even ones that already exist locally |
+| `--list`, `-l` | off | List the files on the camera and exit without downloading |
+| `--skip-ble`, `--no-ble` | off | Skip Bluetooth wake (camera is already awake) |
 | `--ble-address` | *(auto)* | Manually specify the GoPro BLE address |
+
+If `--keep-originals` is not passed, the script asks once before transcoding whether
+to keep the raw downloads.
 
 ### Examples
 
@@ -80,6 +87,9 @@ python gopro_unloader.py --skip-ble
 
 # Download only, don't delete from camera
 python gopro_unloader.py --no-delete
+
+# See what's on the camera without downloading anything
+python gopro_unloader.py --list
 ```
 
 ---
@@ -87,9 +97,9 @@ python gopro_unloader.py --no-delete
 ## Output Structure
 
 ```
-gopro_output/
+F:/gopro/         # or whatever --output-dir points at
 ├── raw/          # Original files downloaded from camera (deleted after transcode
-│                 # unless --keep-originals is set)
+│                 # unless --keep-originals is set or you answer "y" at the prompt)
 └── transcoded/   # 1080p H.264/AAC MP4 files
 ```
 
