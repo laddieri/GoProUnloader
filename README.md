@@ -1,11 +1,21 @@
 # GoPro Unloader
 
-A **Python script** and **Android app** that automate the full offload workflow for a **GoPro Hero 11 Mini**:
+A **Windows desktop app**, a **command-line script**, and an **Android app** that
+automate the full offload workflow for a **GoPro Hero 11 Mini**:
 
 1. **Wakes** the camera via Bluetooth LE
 2. **Downloads** all videos over WiFi using the [GoPro Open API](https://gopro.github.io/OpenGoPro/)
 3. **Deletes** the downloaded files from the camera
 4. **Transcodes** them to 1080p H.264/AAC using FFmpeg
+
+| I want to... | Run |
+|---|---|
+| Browse thumbnails, preview clips, pick what to copy | `python gopro_gui.py` |
+| Offload everything unattended | `python gopro_unloader.py` |
+| Do it from a phone | the `app/` Android project |
+
+Both Python front ends share `gopro_core.py`, which holds all the BLE, HTTP,
+and FFmpeg logic.
 
 ---
 
@@ -16,8 +26,14 @@ A **Python script** and **Android app** that automate the full offload workflow 
 | Python 3.11+ | Runtime |
 | [`bleak`](https://github.com/hbldh/bleak) | Bluetooth LE communication |
 | [`requests`](https://docs.python-requests.org/) | HTTP downloads & GoPro API |
-| [`tqdm`](https://github.com/tqdm/tqdm) | Download & transcode progress bars |
+| [`tqdm`](https://github.com/tqdm/tqdm) | Download & transcode progress bars (CLI) |
+| [`Pillow`](https://python-pillow.org/) | Thumbnail rendering (GUI) |
 | [`ffmpeg`](https://ffmpeg.org/) | Video transcoding (must be on `PATH`) |
+| `ffplay` | Video preview in the GUI (ships with FFmpeg) |
+
+`tkinter` powers the GUI and ships with the standard python.org Windows
+installer. If you get `ModuleNotFoundError: No module named 'tkinter'`,
+re-run the installer and tick **tcl/tk and IDLE**.
 
 ### Install Python dependencies
 
@@ -51,7 +67,57 @@ sudo apt install ffmpeg
 
 ---
 
-## Usage
+## Windows app
+
+```bash
+python gopro_gui.py
+```
+
+![The offload window](docs/gui.png)
+
+### What you can do
+
+**Connect**
+- **Connect via Bluetooth** wakes the camera (even from sleep), reads the WiFi
+  SSID and password off it, and turns its hotspot on. The credentials appear in
+  a banner with a **Copy password** button, and on Windows a **Join
+  automatically** button asks the adapter to switch networks for you. If that
+  fails, join from the Windows WiFi menu — the app keeps waiting either way.
+- **Already on WiFi** skips Bluetooth entirely when the camera is up.
+- Battery level shows in the corner once connected, and a keepalive ping runs
+  the whole time you're connected so the camera never sleeps mid-transfer.
+
+**Browse**
+- Every clip and photo on the card appears as a thumbnail tile pulled straight
+  from the camera, with filename, size and duration. The `.LRV`/`.THM` proxy
+  files the camera keeps alongside each clip are hidden.
+- Videos start pre-selected, photos don't. **All** / **None** select in bulk,
+  and the header keeps a running count and total size of what you've picked.
+
+**Preview before downloading**
+- Click a tile for a full-size preview frame in the sidebar; **Play preview**
+  (or double-clicking the tile) streams the clip in an `ffplay` window
+  *without downloading it*.
+- It streams the camera's low-res `.LRV` proxy when one exists, so preview
+  starts in a second or two even for a multi-gigabyte clip. Clips with no
+  proxy stream at full resolution and may buffer.
+
+**Options** (all in the sidebar, applied when you hit Download)
+- **Copy files to** — pick any destination folder.
+- **Transcode to 1080p** — on by default; **Keep original files** decides
+  whether the raw download survives the transcode.
+- **Delete from camera after copying** — asks for confirmation first, and only
+  ever deletes files that downloaded successfully. Deleting a clip also removes
+  its `.LRV`/`.THM` siblings, so the card actually frees up.
+- **Skip files already downloaded** — makes re-runs resume instead of refetch.
+
+**During a transfer** a progress bar tracks the whole run file by file, **Stop**
+cancels cleanly (partial files are removed), and the log pane at the bottom
+carries the same messages the CLI prints.
+
+---
+
+## Command line
 
 ```
 python gopro_unloader.py [OPTIONS]
@@ -111,12 +177,15 @@ F:/gopro/         # or whatever --output-dir points at
 Uses `bleak` to scan for a device whose name starts with `"GoPro"`, connects, and writes a BLE command to the GoPro Command characteristic (`b5f90072-…`). This wakes the camera and brings up the WiFi Access Point.
 
 ### 2. WiFi Download
-Polls `http://10.5.5.9:8080/gopro/media/list` until the camera's HTTP server responds, then iterates over all `.MP4` files and streams them down in 1 MiB chunks.
+Polls `http://10.5.5.9:8080/gopro/media/list` until the camera's HTTP server responds, then iterates over the media and streams each file down in 64 KiB chunks. A background thread pings `/gopro/camera/keep_alive` every 2.5 s so the camera doesn't sleep part-way through.
 
-### 3. Delete from Camera
-Sends `DELETE http://10.5.5.9:8080/gopro/media/delete/file?path=<folder>/<name>` for each successfully downloaded file.
+### 3. Thumbnails and Preview (GUI)
+Grid tiles come from `/gopro/media/thumbnail?path=…` and the larger sidebar frame from `/gopro/media/screennail?path=…`. Preview hands `ffplay` the URL of the clip's `.LRV` proxy so playback streams off the camera with nothing written to disk.
 
-### 4. FFmpeg Transcode
+### 4. Delete from Camera
+Sends `DELETE http://10.5.5.9:8080/gopro/media/delete/file?path=<folder>/<name>` for each successfully downloaded file, plus the matching `.LRV` and `.THM` the camera stores beside it.
+
+### 5. FFmpeg Transcode
 Calls FFmpeg with:
 - Video: `libx264`, `fast` preset, CRF 23
 - Scaling: letterbox/pillarbox to exactly `1920×1080`
@@ -177,9 +246,13 @@ Android/data/com.gopro.unloader/files/Movies/GoProUnloader/
 
 | Problem | Solution |
 |---|---|
-| Camera not found via BLE | Ensure Bluetooth is on and camera is within ~10 m |
+| Camera not found via BLE | Ensure Bluetooth is on and camera is within ~10 m. The camera only advertises for 8 hours after sleeping — press the power button once if it's been longer |
 | WiFi not reachable | Connect your computer/phone to the GoPro WiFi AP first |
 | `ffmpeg not found` | Install FFmpeg and ensure it is on your `PATH` (Python) |
+| GUI: `No module named 'tkinter'` | Re-run the python.org installer and tick **tcl/tk and IDLE** |
+| GUI: tiles say "no preview" | The camera has no thumbnail for that file; the download still works |
+| GUI: **Play preview** does nothing | `ffplay` isn't on `PATH` — it's part of the full FFmpeg build, not the "essentials" one |
+| GUI: **Join automatically** fails | Windows-only, and some adapters refuse it; connect from the WiFi menu instead |
 | Download fails mid-way | Re-run the script/app; already-deleted files are gone but untouched files can be retried |
 | Android: BLE permission denied | Grant *Nearby devices* permission in Android settings |
 | Android: transcoding fails | Ensure the phone has sufficient free storage |
