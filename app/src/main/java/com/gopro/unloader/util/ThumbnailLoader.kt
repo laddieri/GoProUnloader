@@ -7,7 +7,6 @@ import android.os.Looper
 import android.util.LruCache
 import android.widget.ImageView
 import com.gopro.unloader.api.GoProApi
-import com.gopro.unloader.model.MediaFile
 import java.util.concurrent.Executors
 
 /**
@@ -36,7 +35,8 @@ class ThumbnailLoader(private val api: GoProApi) {
     private val failed = mutableSetOf<String>()
 
     /**
-     * Puts a thumbnail for [file] into [view].
+     * Puts the thumbnail for the file at [key] (its camera path) into [view],
+     * with [thumbUrl] as the .THM fallback if the camera listed one.
      *
      * Safe to call from onBindViewHolder: the view is tagged with the file it
      * is waiting for, so a recycled row never shows another clip's picture.
@@ -44,12 +44,12 @@ class ThumbnailLoader(private val api: GoProApi) {
      * is how the caller knows when to take its placeholder down.
      */
     fun load(
-        file: MediaFile,
+        key: String,
+        thumbUrl: String?,
         view: ImageView,
         onLoaded: () -> Unit = {},
         onMissing: () -> Unit = {}
     ) {
-        val key = file.cameraPath
         view.tag = key
 
         val cached = cache.get(key)
@@ -66,7 +66,7 @@ class ThumbnailLoader(private val api: GoProApi) {
         }
 
         executor.execute {
-            val bytes = api.getThumbnail(file)
+            val bytes = api.getThumbnail(key, thumbUrl)
             val bitmap = bytes?.let {
                 try {
                     BitmapFactory.decodeByteArray(it, 0, it.size)

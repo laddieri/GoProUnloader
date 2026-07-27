@@ -11,15 +11,20 @@ import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.gopro.unloader.R
-import com.gopro.unloader.model.DownloadStatus
-import com.gopro.unloader.model.MediaFile
-import com.gopro.unloader.model.TranscodeStatus
+import com.gopro.unloader.model.MediaRow
 import com.gopro.unloader.util.ThumbnailLoader
 
+/**
+ * Renders the camera's file list.
+ *
+ * Works from immutable [MediaRow] snapshots so DiffUtil can actually tell one
+ * emission from the next, and reports ticks back through [onSelectionChanged]
+ * rather than holding selection state of its own.
+ */
 class MediaListAdapter(
     private val thumbnailLoader: ThumbnailLoader? = null,
-    private val onSelectionChanged: () -> Unit = {}
-) : ListAdapter<MediaFile, MediaListAdapter.ViewHolder>(DIFF_CALLBACK) {
+    private val onSelectionChanged: (directory: String, name: String, selected: Boolean) -> Unit
+) : ListAdapter<MediaRow, MediaListAdapter.ViewHolder>(DIFF_CALLBACK) {
 
     inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val cbSelect: CheckBox = itemView.findViewById(R.id.cb_select)
@@ -39,20 +44,40 @@ class MediaListAdapter(
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val file = getItem(position)
+        val row = getItem(position)
 
-        // Checkbox — only interactive before transfer starts
-        val transferring = file.downloadStatus != DownloadStatus.PENDING
-        holder.cbSelect.isEnabled = !transferring
+        // Detach the listener before setting the state, or restoring a
+        // recycled row would fire it and toggle the wrong file.
         holder.cbSelect.setOnCheckedChangeListener(null)
-        holder.cbSelect.isChecked = file.selected
+        holder.cbSelect.isChecked = row.selected
+        holder.cbSelect.isEnabled = row.selectable
         holder.cbSelect.setOnCheckedChangeListener { _, checked ->
-            file.selected = checked
-            onSelectionChanged()
+            onSelectionChanged(row.directory, row.name, checked)
         }
 
-        holder.tvName.text = file.name
-        holder.tvSize.text = formatSize(file.size)
+        holder.tvName.text = row.name
+        holder.tvSize.text = row.sizeText
+
+        if (row.durationText != null) {
+            holder.tvDuration.text = row.durationText
+            holder.tvDuration.visibility = View.VISIBLE
+        } else {
+            holder.tvDuration.visibility = View.GONE
+        }
+
+        if (row.statusText != null) {
+            holder.tvStatus.text = row.statusText
+            holder.tvStatus.visibility = View.VISIBLE
+        } else {
+            holder.tvStatus.visibility = View.GONE
+        }
+
+        if (row.progress != null) {
+            holder.progressBar.progress = row.progress
+            holder.progressBar.visibility = View.VISIBLE
+        } else {
+            holder.progressBar.visibility = View.GONE
+        }
 
         // Thumbnail. The placeholder shows through until an image arrives, and
         // stays put if the camera has none for this file.
@@ -63,98 +88,23 @@ class MediaListAdapter(
             holder.tvThumbPlaceholder.setText(R.string.thumb_none)
         } else {
             thumbnailLoader.load(
-                file = file,
+                key = row.cameraPath,
+                thumbUrl = row.thumbUrl,
                 view = holder.ivThumb,
                 onLoaded = { holder.tvThumbPlaceholder.visibility = View.GONE },
                 onMissing = { holder.tvThumbPlaceholder.setText(R.string.thumb_none) }
             )
         }
-
-        val dur = formatDuration(file.duration)
-        if (dur.isNotEmpty()) {
-            holder.tvDuration.text = dur
-            holder.tvDuration.visibility = View.VISIBLE
-        } else {
-            holder.tvDuration.visibility = View.GONE
-        }
-
-        when {
-            file.downloadStatus == DownloadStatus.DOWNLOADING -> {
-                holder.tvStatus.text = "Downloading… ${file.downloadProgress}%"
-                holder.tvStatus.visibility = View.VISIBLE
-                holder.progressBar.visibility = View.VISIBLE
-                holder.progressBar.progress = file.downloadProgress
-            }
-            file.transcodeStatus == TranscodeStatus.TRANSCODING -> {
-                holder.tvStatus.text = "Transcoding… ${file.transcodeProgress}%"
-                holder.tvStatus.visibility = View.VISIBLE
-                holder.progressBar.visibility = View.VISIBLE
-                holder.progressBar.progress = file.transcodeProgress
-            }
-            file.downloadStatus == DownloadStatus.ERROR -> {
-                holder.tvStatus.text = "Error"
-                holder.tvStatus.visibility = View.VISIBLE
-                holder.progressBar.visibility = View.GONE
-            }
-            file.downloadStatus == DownloadStatus.SKIPPED -> {
-                holder.tvStatus.text = "Skipped (already exists)"
-                holder.tvStatus.visibility = View.VISIBLE
-                holder.progressBar.visibility = View.GONE
-            }
-            file.transcodeStatus == TranscodeStatus.DONE -> {
-                holder.tvStatus.text = "Done ✓"
-                holder.tvStatus.visibility = View.VISIBLE
-                holder.progressBar.visibility = View.GONE
-            }
-            file.downloadStatus == DownloadStatus.DOWNLOADED -> {
-                holder.tvStatus.text = "Downloaded"
-                holder.tvStatus.visibility = View.VISIBLE
-                holder.progressBar.visibility = View.GONE
-            }
-            else -> {
-                holder.tvStatus.visibility = View.GONE
-                holder.progressBar.visibility = View.GONE
-            }
-        }
-    }
-
-    fun selectAll(selected: Boolean) {
-        currentList.forEach { it.selected = selected }
-        notifyItemRangeChanged(0, itemCount)
-        onSelectionChanged()
-    }
-
-    fun selectedCount(): Int = currentList.count { it.selected }
-
-    private fun formatDuration(seconds: Long): String {
-        if (seconds <= 0) return ""
-        val h = seconds / 3600
-        val m = (seconds % 3600) / 60
-        val s = seconds % 60
-        return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
-    }
-
-    private fun formatSize(bytes: Long): String {
-        return when {
-            bytes >= 1_073_741_824 -> "%.1f GB".format(bytes / 1_073_741_824.0)
-            bytes >= 1_048_576 -> "%.1f MB".format(bytes / 1_048_576.0)
-            bytes >= 1_024 -> "%.1f KB".format(bytes / 1_024.0)
-            else -> "$bytes B"
-        }
     }
 
     companion object {
-        private val DIFF_CALLBACK = object : DiffUtil.ItemCallback<MediaFile>() {
-            override fun areItemsTheSame(oldItem: MediaFile, newItem: MediaFile) =
+        private val DIFF_CALLBACK = object : DiffUtil.ItemCallback<MediaRow>() {
+            override fun areItemsTheSame(oldItem: MediaRow, newItem: MediaRow) =
                 oldItem.name == newItem.name && oldItem.directory == newItem.directory
 
-            override fun areContentsTheSame(oldItem: MediaFile, newItem: MediaFile) =
-                oldItem.selected == newItem.selected &&
-                    oldItem.duration == newItem.duration &&
-                    oldItem.downloadStatus == newItem.downloadStatus &&
-                    oldItem.transcodeStatus == newItem.transcodeStatus &&
-                    oldItem.downloadProgress == newItem.downloadProgress &&
-                    oldItem.transcodeProgress == newItem.transcodeProgress
+            // MediaRow is a data class, so this compares every rendered field.
+            override fun areContentsTheSame(oldItem: MediaRow, newItem: MediaRow) =
+                oldItem == newItem
         }
     }
 }

@@ -191,7 +191,11 @@ class GoProApi {
      * The path keeps its "/" un-escaped: the camera answers HTTP 400 to a
      * percent-encoded separator.
      */
-    fun getThumbnail(file: MediaFile, large: Boolean = false): ByteArray? {
+    fun getThumbnail(
+        cameraPath: String,
+        thumbUrl: String? = null,
+        large: Boolean = false
+    ): ByteArray? {
         val endpoints = if (large) {
             listOf(MEDIA_SCREENNAIL_URL, MEDIA_THUMBNAIL_URL)
         } else {
@@ -199,18 +203,22 @@ class GoProApi {
         }
 
         val sources = mutableListOf<String>()
-        endpoints.forEach { sources.add("$it?path=${file.cameraPath}") }
+        endpoints.forEach { sources.add("$it?path=$cameraPath") }
         // Some firmware only accepts the DCIM-prefixed form.
-        endpoints.forEach { sources.add("$it?path=DCIM/${file.cameraPath}") }
-        file.thumbUrl?.let { sources.add(it) }
+        endpoints.forEach { sources.add("$it?path=DCIM/$cameraPath") }
+        thumbUrl?.let { sources.add(it) }
 
         for (url in sources) {
             val bytes = fetchJpeg(url)
             if (bytes != null) return bytes
         }
-        Log.w(TAG, "No thumbnail available for ${file.name}")
+        Log.w(TAG, "No thumbnail available for $cameraPath")
         return null
     }
+
+    /** Convenience overload for callers that already hold the file. */
+    fun getThumbnail(file: MediaFile, large: Boolean = false): ByteArray? =
+        getThumbnail(file.cameraPath, file.thumbUrl, large)
 
     /** GETs a URL and returns the body only if it really is a JPEG. */
     private fun fetchJpeg(url: String): ByteArray? {

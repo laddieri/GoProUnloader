@@ -64,7 +64,9 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
 
-        adapter = MediaListAdapter(viewModel.thumbnailLoader) { updateSelectionCount() }
+        adapter = MediaListAdapter(viewModel.thumbnailLoader) { directory, name, selected ->
+            viewModel.setSelected(directory, name, selected)
+        }
         binding.recyclerView.layoutManager = LinearLayoutManager(this)
         binding.recyclerView.adapter = adapter
 
@@ -99,10 +101,10 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        viewModel.mediaFiles.observe(this) { files ->
-            adapter.submitList(files.toList())
-            val count = files.size
-            binding.tvFileCount.text = if (count == 0) "" else "$count file(s)"
+        viewModel.rows.observe(this) { rows ->
+            adapter.submitList(rows)
+            binding.tvFileCount.text =
+                if (rows.isEmpty()) "" else "${rows.size} file(s)"
             updateSelectionCount()
         }
 
@@ -252,17 +254,15 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnSelectAll.setOnClickListener {
-            adapter.selectAll(true)
-            updateSelectionCount()
+            viewModel.selectAll(true)
         }
 
         binding.btnDeselectAll.setOnClickListener {
-            adapter.selectAll(false)
-            updateSelectionCount()
+            viewModel.selectAll(false)
         }
 
         binding.btnTransferSelected.setOnClickListener {
-            val selected = adapter.selectedCount()
+            val selected = viewModel.selectedCount
             if (selected == 0) {
                 Toast.makeText(this, "No files selected.", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
@@ -271,7 +271,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnDeleteFromGopro.setOnClickListener {
-            val selected = adapter.selectedCount()
+            val selected = viewModel.selectedCount
             if (selected == 0) {
                 Toast.makeText(this, "No files selected.", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
@@ -281,8 +281,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateSelectionCount() {
-        val total = adapter.currentList.size
-        val selected = adapter.selectedCount()
+        val total = viewModel.fileCount
+        val selected = viewModel.selectedCount
         binding.tvSelectedCount.text = "$selected of $total selected"
         binding.btnTransferSelected.isEnabled =
             selected > 0 && viewModel.phase.value == MainViewModel.Phase.LIST_READY

@@ -20,7 +20,9 @@ import com.gopro.unloader.wifi.WifiConnector
 import com.gopro.unloader.model.CameraInfo
 import com.gopro.unloader.model.DownloadStatus
 import com.gopro.unloader.model.MediaFile
+import com.gopro.unloader.model.MediaRow
 import com.gopro.unloader.model.TranscodeStatus
+import com.gopro.unloader.model.toRow
 import com.gopro.unloader.util.AppSettings
 import com.gopro.unloader.util.MediaStoreHelper
 import com.gopro.unloader.util.ThumbnailLoader
@@ -39,8 +41,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _statusLog = MutableLiveData<String>()
     val statusLog: LiveData<String> = _statusLog
 
-    private val _mediaFiles = MutableLiveData<List<MediaFile>>()
-    val mediaFiles: LiveData<List<MediaFile>> = _mediaFiles
+    /**
+     * The camera's files, and the single source of truth for selection and
+     * per-file transfer state. Deliberately not LiveData: these objects are
+     * mutated in place by the transfer, and the UI observes [rows] - immutable
+     * snapshots - so the list adapter can tell one emission from the next.
+     */
+    @Volatile
+    private var files: List<MediaFile> = emptyList()
+
+    private val _rows = MutableLiveData<List<MediaRow>>(emptyList())
+    val rows: LiveData<List<MediaRow>> = _rows
+
+    val fileCount: Int get() = files.size
+    val selectedCount: Int get() = files.count { it.selected }
 
     private val _isBusy = MutableLiveData(false)
     val isBusy: LiveData<Boolean> = _isBusy
@@ -101,6 +115,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * The .LRV/.THM sidecars from the last listing. Kept out of the visible
      * file list, but deleted along with the clip they belong to.
      */
+    @Volatile
     private var sidecars: List<MediaFile> = emptyList()
 
     private val outputDir: File
@@ -346,7 +361,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun browseFiles() {
         if (_isBusy.value == true) return
         _isBusy.value = true
-        _mediaFiles.value = emptyList()
+        files = emptyList()
+        publishRows()
 
         viewModelScope.launch {
             try {
@@ -400,7 +416,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * alter the rules half way through the run.
      */
     fun startTransfer(options: TransferOptions = settings.toTransferOptions()) {
-        val filesToTransfer = _mediaFiles.value?.filter { it.selected } ?: emptyList()
+        val filesToTransfer = files.filter { it.selected }
         if (filesToTransfer.isEmpty()) {
             log("No files selected.")
             return
@@ -418,7 +434,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun deleteSelectedFiles() {
-        val filesToDelete = _mediaFiles.value?.filter { it.selected } ?: emptyList()
+        val filesToDelete = files.filter { it.selected }
         if (filesToDelete.isEmpty()) {
             log("No files selected.")
             return
@@ -485,7 +501,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     existing.exists() && existing.length() == file.size
 
                 file.downloadStatus = DownloadStatus.DOWNLOADING
-                notifyListChanged()
+                publishRows()
 
                 val dest = withContext(Dispatchers.IO) {
                     downloadMgr.download(
@@ -493,8 +509,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         destDir = outputDir,
                         forceRedownload = !options.skipExisting,
                         onProgress = { pct ->
-                            file.downloadProgress = pct
-                            notifyListChanged()
+                            // Fires per 64 KiB chunk; only redraw when the
+                            // number the user sees actually moves.
+                            if (pct != file.downloadProgress) {
+                                file.downloadProgress = pct
+                                publishRows()
+                            }
                         }
                     )
                 }
@@ -514,7 +534,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     file.downloadStatus = DownloadStatus.ERROR
                     log("Error: ${file.name}")
                 }
-                notifyListChanged()
+                publishRows()
             }
         } finally {
             keepAliveJob.cancel()
@@ -529,15 +549,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 log("Transcoding ${mp4s.size} video(s) to 1080p…")
                 for ((file, src) in mp4s) {
                     file.transcodeStatus = TranscodeStatus.TRANSCODING
-                    notifyListChanged()
+                    publishRows()
 
                     val out = withContext(Dispatchers.IO) {
                         transcodeMgr.transcodeTo1080p(
                             src = src,
                             transcodeDir = transcodeDir,
                             onProgress = { pct ->
-                                file.transcodeProgress = pct
-                                notifyListChanged()
+                                if (pct != file.transcodeProgress) {
+                                    file.transcodeProgress = pct
+                                    publishRows()
+                                }
                             },
                             onStatus = { msg -> log(msg) }
                         )
@@ -557,7 +579,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         // Transcode was skipped (already ≤1080p) — publish the original
                         MediaStoreHelper.addVideoToGallery(context, src)
                     }
-                    notifyListChanged()
+                    publishRows()
                 }
             }
         } else {
@@ -719,7 +741,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             sidecars = list.filter { it.isSidecar }
             shown
         }
-        _mediaFiles.postValue(visible)
+        files = visible
+        publishRows()
         log("Found ${visible.size} file(s) on GoPro.")
         return visible
     }
@@ -729,8 +752,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _statusLog.postValue(if (current.isEmpty()) msg else "$current\n$msg")
     }
 
-    private fun notifyListChanged() {
-        _mediaFiles.postValue(_mediaFiles.value)
+    /** Re-renders the list from the current file state. */
+    private fun publishRows() {
+        _rows.postValue(files.map { it.toRow() })
+    }
+
+    /** Ticks a single file, addressed by identity rather than position. */
+    fun setSelected(directory: String, name: String, selected: Boolean) {
+        val file = files.firstOrNull { it.directory == directory && it.name == name }
+        if (file == null || file.selected == selected) return
+        file.selected = selected
+        publishRows()
+    }
+
+    fun selectAll(selected: Boolean) {
+        var changed = false
+        for (file in files) {
+            if (file.selected != selected) {
+                file.selected = selected
+                changed = true
+            }
+        }
+        if (changed) publishRows()
     }
 
     private fun formatMb(mb: Long): String = when {
