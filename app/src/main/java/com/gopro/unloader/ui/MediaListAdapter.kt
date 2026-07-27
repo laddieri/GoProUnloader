@@ -4,6 +4,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.CheckBox
+import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
@@ -13,13 +14,17 @@ import com.gopro.unloader.R
 import com.gopro.unloader.model.DownloadStatus
 import com.gopro.unloader.model.MediaFile
 import com.gopro.unloader.model.TranscodeStatus
+import com.gopro.unloader.util.ThumbnailLoader
 
 class MediaListAdapter(
+    private val thumbnailLoader: ThumbnailLoader? = null,
     private val onSelectionChanged: () -> Unit = {}
 ) : ListAdapter<MediaFile, MediaListAdapter.ViewHolder>(DIFF_CALLBACK) {
 
     inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val cbSelect: CheckBox = itemView.findViewById(R.id.cb_select)
+        val ivThumb: ImageView = itemView.findViewById(R.id.iv_thumbnail)
+        val tvThumbPlaceholder: TextView = itemView.findViewById(R.id.tv_thumb_placeholder)
         val tvName: TextView = itemView.findViewById(R.id.tv_file_name)
         val tvDuration: TextView = itemView.findViewById(R.id.tv_duration)
         val tvSize: TextView = itemView.findViewById(R.id.tv_file_size)
@@ -48,6 +53,22 @@ class MediaListAdapter(
 
         holder.tvName.text = file.name
         holder.tvSize.text = formatSize(file.size)
+
+        // Thumbnail. The placeholder shows through until an image arrives, and
+        // stays put if the camera has none for this file.
+        holder.tvThumbPlaceholder.setText(R.string.thumb_loading)
+        holder.tvThumbPlaceholder.visibility = View.VISIBLE
+        if (thumbnailLoader == null) {
+            holder.ivThumb.setImageBitmap(null)
+            holder.tvThumbPlaceholder.setText(R.string.thumb_none)
+        } else {
+            thumbnailLoader.load(
+                file = file,
+                view = holder.ivThumb,
+                onLoaded = { holder.tvThumbPlaceholder.visibility = View.GONE },
+                onMissing = { holder.tvThumbPlaceholder.setText(R.string.thumb_none) }
+            )
+        }
 
         val dur = formatDuration(file.duration)
         if (dur.isNotEmpty()) {

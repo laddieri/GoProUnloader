@@ -14,6 +14,7 @@ import android.provider.Settings
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.widget.CheckBox
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -21,6 +22,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.android.material.button.MaterialButton
 import com.gopro.unloader.databinding.ActivityMainBinding
 import com.gopro.unloader.service.GoProForegroundService
 import com.gopro.unloader.ui.MainViewModel
@@ -62,7 +64,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
         setSupportActionBar(binding.toolbar)
 
-        adapter = MediaListAdapter { updateSelectionCount() }
+        adapter = MediaListAdapter(viewModel.thumbnailLoader) { updateSelectionCount() }
         binding.recyclerView.layoutManager = LinearLayoutManager(this)
         binding.recyclerView.adapter = adapter
 
@@ -134,14 +136,6 @@ class MainActivity : AppCompatActivity() {
             if (event > lastWifiSettingsEvent) {
                 lastWifiSettingsEvent = event
                 openWifiSettings()
-            }
-        }
-
-        var lastPromptId = 0
-        viewModel.postTransferPrompt.observe(this) { prompt ->
-            if (prompt != null && prompt.id != lastPromptId) {
-                lastPromptId = prompt.id
-                showPostTransferDialog(prompt)
             }
         }
 
@@ -297,56 +291,34 @@ class MainActivity : AppCompatActivity() {
     // =========================================================== transfer confirm dialog
 
     private fun showTransferConfirmDialog(selectedCount: Int) {
-        val items = arrayOf("Transcode videos to 1080p")
-        val checked = booleanArrayOf(true)
+        val options = viewModel.settings.toTransferOptions()
+
+        val summary = buildString {
+            appendLine(if (options.transcode) {
+                if (options.keepOriginals) {
+                    "• Transcode to 1080p, keeping the full-size original"
+                } else {
+                    "• Transcode to 1080p, replacing the full-size original"
+                }
+            } else {
+                "• Copy across as-is, no transcoding"
+            })
+            appendLine(
+                if (options.deleteFromCamera) "• DELETE from the camera once copied"
+                else "• Leave the files on the camera"
+            )
+            append(
+                if (options.skipExisting) "• Skip anything already downloaded"
+                else "• Re-download everything"
+            )
+        }
 
         AlertDialog.Builder(this)
             .setTitle("Transfer $selectedCount file(s)")
-            .setMultiChoiceItems(items, checked) { _, which, isChecked ->
-                checked[which] = isChecked
-            }
-            .setPositiveButton("Transfer") { _, _ ->
-                viewModel.startTransfer(transcode = checked[0])
-            }
+            .setMessage("$summary\n\nChange these under Options.")
+            .setPositiveButton("Transfer") { _, _ -> viewModel.startTransfer() }
+            .setNeutralButton("Options…") { _, _ -> showSettingsDialog() }
             .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun showPostTransferDialog(prompt: MainViewModel.PostTransferPrompt) {
-        val items = mutableListOf<String>()
-        val checkedList = mutableListOf<Boolean>()
-
-        // Index mapping: track which option is at which position
-        var deleteFromGoproIdx = -1
-        var deleteLocalIdx = -1
-
-        if (prompt.hasGoproFiles) {
-            deleteFromGoproIdx = items.size
-            items.add("Delete originals from GoPro")
-            checkedList.add(false)
-        }
-        if (prompt.hasLocalOriginals) {
-            deleteLocalIdx = items.size
-            items.add("Delete full-size videos from phone (keep 1080p only)")
-            checkedList.add(true)
-        }
-
-        val checked = checkedList.toBooleanArray()
-
-        AlertDialog.Builder(this)
-            .setTitle("What would you like to do with the original files?")
-            .setMultiChoiceItems(items.toTypedArray(), checked) { _, which, isChecked ->
-                checked[which] = isChecked
-            }
-            .setPositiveButton("Continue") { _, _ ->
-                viewModel.submitPostTransferChoice(
-                    MainViewModel.PostTransferChoice(
-                        deleteFromGoPro = deleteFromGoproIdx >= 0 && checked[deleteFromGoproIdx],
-                        deleteLocalOriginals = deleteLocalIdx >= 0 && checked[deleteLocalIdx]
-                    )
-                )
-            }
-            .setCancelable(false)
             .show()
     }
 
@@ -421,13 +393,44 @@ class MainActivity : AppCompatActivity() {
     // =========================================================== settings dialog
 
     private fun showSettingsDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("Settings")
-            .setPositiveButton("BLE Address") { _, _ ->
-                showBleAddressDialog()
+        val view = layoutInflater.inflate(R.layout.dialog_options, null)
+        val cbTranscode: CheckBox = view.findViewById(R.id.cb_transcode)
+        val cbKeepOriginals: CheckBox = view.findViewById(R.id.cb_keep_originals)
+        val cbDeleteFromCamera: CheckBox = view.findViewById(R.id.cb_delete_from_camera)
+        val cbSkipExisting: CheckBox = view.findViewById(R.id.cb_skip_existing)
+        val btnBleAddress: MaterialButton = view.findViewById(R.id.btn_ble_address)
+
+        val settings = viewModel.settings
+        cbTranscode.isChecked = settings.transcode
+        cbKeepOriginals.isChecked = settings.keepOriginals
+        cbDeleteFromCamera.isChecked = settings.deleteFromCamera
+        cbSkipExisting.isChecked = settings.skipExisting
+
+        // Keeping the original only means anything when there is a 1080p copy
+        // for it to sit beside.
+        fun syncKeepOriginals() {
+            cbKeepOriginals.isEnabled = cbTranscode.isChecked
+        }
+        syncKeepOriginals()
+        cbTranscode.setOnCheckedChangeListener { _, _ -> syncKeepOriginals() }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.options_title)
+            .setView(view)
+            .setPositiveButton("Save") { _, _ ->
+                settings.transcode = cbTranscode.isChecked
+                settings.keepOriginals = cbKeepOriginals.isChecked
+                settings.deleteFromCamera = cbDeleteFromCamera.isChecked
+                settings.skipExisting = cbSkipExisting.isChecked
             }
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+
+        btnBleAddress.setOnClickListener {
+            dialog.dismiss()
+            showBleAddressDialog()
+        }
+        dialog.show()
     }
 
     private fun formatMb(mb: Long): String = when {
@@ -450,5 +453,11 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("Clear") { _, _ -> viewModel.bleAddress = null }
             .show()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // The RecyclerView holds bitmaps; drop them with the Activity.
+        binding.recyclerView.adapter = null
     }
 }

@@ -25,7 +25,32 @@
                 android:id="@+id/cb_select"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="8dp" />
+                android:layout_marginEnd="4dp" />
+
+            <!-- Thumbnail from the camera, with a placeholder behind it -->
+            <FrameLayout
+                android:layout_width="80dp"
+                android:layout_height="60dp"
+                android:layout_marginEnd="8dp"
+                android:background="?attr/colorSurfaceVariant">
+
+                <TextView
+                    android:id="@+id/tv_thumb_placeholder"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:textAppearance="?attr/textAppearanceLabelSmall"
+                    android:textColor="?attr/colorOnSurfaceVariant"
+                    android:text="@string/thumb_loading" />
+
+                <ImageView
+                    android:id="@+id/iv_thumbnail"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="centerCrop"
+                    android:contentDescription="@string/thumb_description" />
+
+            </FrameLayout>
 
             <!-- Name + duration -->
             <LinearLayout

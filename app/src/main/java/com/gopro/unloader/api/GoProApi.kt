@@ -21,7 +21,10 @@ class GoProApi {
         const val MEDIA_DELETE_URL = "$GOPRO_BASE/gopro/media/delete/file"
         const val MEDIA_BASE_URL = "$GOPRO_BASE/videos/DCIM"
         const val MEDIA_INFO_URL = "$GOPRO_BASE/gopro/media/info"
+        const val MEDIA_THUMBNAIL_URL = "$GOPRO_BASE/gopro/media/thumbnail"
+        const val MEDIA_SCREENNAIL_URL = "$GOPRO_BASE/gopro/media/screennail"
         const val CAMERA_STATE_URL = "$GOPRO_BASE/gopro/camera/state"
+        const val KEEP_ALIVE_URL = "$GOPRO_BASE/gopro/camera/keep_alive"
         const val SHUTTER_START_URL = "$GOPRO_BASE/gopro/camera/shutter/start"
         const val SHUTTER_STOP_URL = "$GOPRO_BASE/gopro/camera/shutter/stop"
     }
@@ -147,10 +150,90 @@ class GoProApi {
                     files.add(MediaFile(name = name, directory = directory, size = size, url = url))
                 }
             }
+            pairSidecars(files)
             files
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching media list", e)
             emptyList()
+        }
+    }
+
+    /**
+     * Links each clip to the .LRV proxy and .THM thumbnail the camera writes
+     * beside it, matching on the digits they share.
+     */
+    private fun pairSidecars(files: List<MediaFile>) {
+        val proxies = mutableMapOf<String, MediaFile>()
+        val thumbs = mutableMapOf<String, MediaFile>()
+        for (f in files) {
+            val id = f.clipId ?: continue
+            when {
+                f.name.uppercase().endsWith(".LRV") -> proxies[id] = f
+                f.name.uppercase().endsWith(".THM") -> thumbs[id] = f
+            }
+        }
+        for (f in files) {
+            if (f.isSidecar) continue
+            val id = f.clipId ?: continue
+            f.proxyUrl = proxies[id]?.url
+            f.thumbUrl = thumbs[id]?.url
+        }
+    }
+
+    /**
+     * Fetches a JPEG preview frame for [file], trying every source the camera
+     * offers until one returns a real image.
+     *
+     * The thumbnail endpoints aren't reliable across firmware versions, so
+     * this falls back to the .THM sidecar, which is a plain JPEG served over
+     * the same path as the downloads themselves.
+     *
+     * The path keeps its "/" un-escaped: the camera answers HTTP 400 to a
+     * percent-encoded separator.
+     */
+    fun getThumbnail(file: MediaFile, large: Boolean = false): ByteArray? {
+        val endpoints = if (large) {
+            listOf(MEDIA_SCREENNAIL_URL, MEDIA_THUMBNAIL_URL)
+        } else {
+            listOf(MEDIA_THUMBNAIL_URL, MEDIA_SCREENNAIL_URL)
+        }
+
+        val sources = mutableListOf<String>()
+        endpoints.forEach { sources.add("$it?path=${file.cameraPath}") }
+        // Some firmware only accepts the DCIM-prefixed form.
+        endpoints.forEach { sources.add("$it?path=DCIM/${file.cameraPath}") }
+        file.thumbUrl?.let { sources.add(it) }
+
+        for (url in sources) {
+            val bytes = fetchJpeg(url)
+            if (bytes != null) return bytes
+        }
+        Log.w(TAG, "No thumbnail available for ${file.name}")
+        return null
+    }
+
+    /** GETs a URL and returns the body only if it really is a JPEG. */
+    private fun fetchJpeg(url: String): ByteArray? {
+        return try {
+            val request = Request.Builder().url(url).build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.d(TAG, "Thumbnail source ${response.code}: $url")
+                    return null
+                }
+                val bytes = response.body?.bytes() ?: return null
+                // The camera sometimes answers 200 with a JSON error body.
+                if (bytes.size < 2 ||
+                    bytes[0] != 0xFF.toByte() || bytes[1] != 0xD8.toByte()
+                ) {
+                    Log.d(TAG, "Thumbnail source returned non-JPEG: $url")
+                    return null
+                }
+                bytes
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Thumbnail source failed ($url): ${e.message}")
+            null
         }
     }
 
@@ -201,6 +284,24 @@ class GoProApi {
     }
 
     /**
+     * Deletes [file] along with the .LRV/.THM sidecars the camera keeps beside
+     * it. Removing only the .MP4 leaves those behind, so the card never fully
+     * frees up. Returns true only if every part went.
+     */
+    fun deleteFileWithSidecars(file: MediaFile, allFiles: List<MediaFile>): Boolean {
+        var ok = deleteFile(file)
+        val id = file.clipId
+        if (id != null) {
+            for (other in allFiles) {
+                if (other !== file && other.isSidecar && other.clipId == id) {
+                    if (!deleteFile(other)) ok = false
+                }
+            }
+        }
+        return ok
+    }
+
+    /**
      * Returns true if the camera is currently recording, false if idle, or null if unreachable.
      * Uses status field 8 (encodingActive) from the camera state endpoint.
      */
@@ -240,11 +341,16 @@ class GoProApi {
         }
     }
 
-    /** Sends a keepalive ping. Call periodically during downloads. */
+    /**
+     * Sends a keepalive ping. Call periodically during downloads.
+     *
+     * Uses the dedicated keep_alive endpoint: polling camera/state does not
+     * reset the camera's sleep timer, so it powers off mid-transfer.
+     */
     fun keepAlive() {
         try {
-            val request = Request.Builder().url(CAMERA_STATE_URL).build()
-            client.newCall(request).execute().close()
+            val request = Request.Builder().url(KEEP_ALIVE_URL).build()
+            pingClient.newCall(request).execute().close()
         } catch (_: Exception) {
         }
     }
