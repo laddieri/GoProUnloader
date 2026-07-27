@@ -21,3 +21,8 @@ venv/
 
 # Output directories
 gopro_output/
+
+# PyInstaller
+build/
+dist/
+*.manifest

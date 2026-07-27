@@ -11,6 +11,7 @@ through optional callbacks so each front end can render it however it likes.
 
 import asyncio
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -29,7 +30,12 @@ log = logging.getLogger("gopro")
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-GOPRO_BASE            = "http://10.5.5.9:8080"
+# The camera is always at 10.5.5.9 over its own Wi-Fi. GOPRO_BASE_URL points
+# the whole app somewhere else, which is only useful for testing against a
+# stand-in server.
+GOPRO_BASE            = os.environ.get(
+    "GOPRO_BASE_URL", "http://10.5.5.9:8080"
+).rstrip("/")
 MEDIA_LIST_URL        = f"{GOPRO_BASE}/gopro/media/list"
 MEDIA_DELETE_URL      = f"{GOPRO_BASE}/gopro/media/delete/file"
 MEDIA_BASE_URL        = f"{GOPRO_BASE}/videos/DCIM"
@@ -66,19 +72,50 @@ def _check_cancel(cancel_event) -> None:
 # FFmpeg helpers
 # ---------------------------------------------------------------------------
 
+def app_dir() -> Path:
+    """
+    Where the application lives - the folder holding the .exe once frozen,
+    otherwise the source directory.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    return Path(__file__).resolve().parent
+
+
 def find_ffmpeg_tool(tool: str) -> str | None:
-    """Return the full path to an FFmpeg tool, or None if it isn't on PATH."""
+    """
+    Full path to an FFmpeg tool, or None if it can't be found.
+
+    Looks beside the application first (and in an `ffmpeg` subfolder), so a
+    packaged build can ship the binaries next to the .exe, then falls back to
+    PATH for a normal system install.
+    """
+    exe = tool + (".exe" if sys.platform == "win32" else "")
+    roots = [app_dir(), app_dir() / "ffmpeg"]
+    bundle = getattr(sys, "_MEIPASS", None)
+    if bundle:
+        roots += [Path(bundle), Path(bundle) / "ffmpeg"]
+    for root in roots:
+        candidate = root / exe
+        if candidate.is_file():
+            return str(candidate)
     return shutil.which(tool)
 
 
+def _tool(name: str) -> str:
+    """Resolved path to an FFmpeg tool, falling back to the bare name."""
+    return find_ffmpeg_tool(name) or name
+
+
 def check_ffmpeg() -> None:
-    """Raise if ffmpeg or ffprobe are not found on PATH."""
+    """Raise if ffmpeg or ffprobe can't be found."""
     for tool in ("ffmpeg", "ffprobe"):
         if find_ffmpeg_tool(tool) is None:
             raise RuntimeError(
-                f"{tool} not found on PATH. "
-                "Install FFmpeg from https://ffmpeg.org/download.html "
-                "and make sure it is added to PATH."
+                f"{tool} was not found.\n\n"
+                "Install FFmpeg from https://ffmpeg.org/download.html and add "
+                "it to PATH, or drop ffmpeg.exe, ffprobe.exe and ffplay.exe "
+                f"into:\n{app_dir()}"
             )
 
 
@@ -94,7 +131,7 @@ def get_video_height(filepath: Path) -> int | None:
     try:
         result = subprocess.run(
             [
-                "ffprobe", "-v", "error",
+                _tool("ffprobe"), "-v", "error",
                 "-select_streams", "v:0",
                 "-show_entries", "stream=height",
                 "-of", "csv=p=0",
@@ -113,7 +150,7 @@ def get_video_duration(filepath: Path) -> float | None:
     try:
         result = subprocess.run(
             [
-                "ffprobe", "-v", "error",
+                _tool("ffprobe"), "-v", "error",
                 "-select_streams", "v:0",
                 "-show_entries", "format=duration",
                 "-of", "csv=p=0",
@@ -162,7 +199,7 @@ def transcode_to_1080p(
     try:
         process = subprocess.Popen(
             [
-                "ffmpeg", "-y",
+                _tool("ffmpeg"), "-y",
                 "-i", str(src),
                 "-vf", (
                     "scale=1920:1080:force_original_aspect_ratio=decrease,"
@@ -228,7 +265,7 @@ def launch_preview(url: str, title: str) -> subprocess.Popen:
         )
     return subprocess.Popen(
         [
-            "ffplay",
+            _tool("ffplay"),
             "-autoexit",
             "-loglevel", "error",
             "-window_title", title,
@@ -604,7 +641,7 @@ def jpeg_to_png(data: bytes, max_w: int, max_h: int) -> bytes | None:
     try:
         result = subprocess.run(
             [
-                "ffmpeg", "-loglevel", "error",
+                _tool("ffmpeg"), "-loglevel", "error",
                 "-f", "image2pipe", "-i", "-",
                 "-vf", f"scale={max_w}:{max_h}:force_original_aspect_ratio=decrease",
                 "-f", "image2", "-c:v", "png",
@@ -633,7 +670,7 @@ def grab_frame(url: str, width: int = 320) -> bytes | None:
     try:
         result = subprocess.run(
             [
-                "ffmpeg", "-loglevel", "error",
+                _tool("ffmpeg"), "-loglevel", "error",
                 "-i", url,
                 "-frames:v", "1",
                 "-vf", f"scale={width}:-2",

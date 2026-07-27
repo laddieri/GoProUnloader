@@ -1,0 +1,60 @@
+name: Build Windows executable
+
+# Run it by hand from the Actions tab, or push a v* tag to also publish a
+# release. Every run uploads the built folder as a downloadable artifact.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build
+        run: pyinstaller GoProUnloader.spec --noconfirm
+
+      - name: Smoke-test the build
+        shell: pwsh
+        run: |
+          # The GUI needs a desktop, but the console tools must at least start,
+          # find their dependencies, and print their help.
+          .\dist\GoProUnloader\gopro-unloader-cli.exe --help
+          if ($LASTEXITCODE -ne 0) { throw "CLI failed to start" }
+          Get-Item .\dist\GoProUnloader\GoProUnloader.exe
+
+      - name: Package
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist\GoProUnloader\* `
+                           -DestinationPath GoProUnloader-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GoProUnloader-windows
+          path: GoProUnloader-windows.zip
+          retention-days: 30
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: GoProUnloader-windows.zip
