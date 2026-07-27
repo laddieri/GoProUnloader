@@ -592,6 +592,33 @@ def _fetch_jpeg(url: str, attempts: int = 2) -> bytes | None:
 _fetch_jpeg.last_error = ""
 
 
+def jpeg_to_png(data: bytes, max_w: int, max_h: int) -> bytes | None:
+    """
+    Re-encode JPEG bytes as a PNG scaled to fit a box, using FFmpeg.
+
+    Tk can display PNG on its own but not JPEG, so this lets the UI show
+    thumbnails without Pillow installed - FFmpeg is already required anyway.
+    """
+    if find_ffmpeg_tool("ffmpeg") is None:
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-loglevel", "error",
+                "-f", "image2pipe", "-i", "-",
+                "-vf", f"scale={max_w}:{max_h}:force_original_aspect_ratio=decrease",
+                "-f", "image2", "-c:v", "png",
+                "-",
+            ],
+            input=data, capture_output=True, timeout=20, **_no_window_kwargs(),
+        )
+        if result.returncode == 0 and result.stdout[:4] == b"\x89PNG":
+            return result.stdout
+    except Exception:
+        pass
+    return None
+
+
 def grab_frame(url: str, width: int = 320) -> bytes | None:
     """
     Pull a single JPEG frame out of a video stream with FFmpeg.

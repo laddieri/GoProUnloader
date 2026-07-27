@@ -27,7 +27,7 @@ and FFmpeg logic.
 | [`bleak`](https://github.com/hbldh/bleak) | Bluetooth LE communication |
 | [`requests`](https://docs.python-requests.org/) | HTTP downloads & GoPro API |
 | [`tqdm`](https://github.com/tqdm/tqdm) | Download & transcode progress bars (CLI) |
-| [`Pillow`](https://python-pillow.org/) | Thumbnail rendering (GUI) |
+| [`Pillow`](https://python-pillow.org/) | Thumbnail rendering (GUI) — optional; without it FFmpeg draws them instead, just slower |
 | [`ffmpeg`](https://ffmpeg.org/) | Video transcoding (must be on `PATH`) |
 | `ffplay` | Video preview in the GUI (ships with FFmpeg) |
 
@@ -104,12 +104,22 @@ python gopro_gui.py
 
 **Options** (all in the sidebar, applied when you hit Download)
 - **Copy files to** — pick any destination folder.
-- **Transcode to 1080p** — on by default; **Keep original files** decides
-  whether the raw download survives the transcode.
+- **Transcode to 1080p** — turn it off to just copy the originals across.
+- **Also keep the full-size original** — with transcoding on, keeps the
+  untouched original in `raw/` alongside the 1080p copy in `transcoded/`.
+  Off means the original is removed once its 1080p copy is written.
 - **Delete from camera after copying** — asks for confirmation first, and only
   ever deletes files that downloaded successfully. Deleting a clip also removes
   its `.LRV`/`.THM` siblings, so the card actually frees up.
 - **Skip files already downloaded** — makes re-runs resume instead of refetch.
+- **Join camera Wi-Fi automatically** (Windows) — when the Bluetooth step has
+  read the credentials, switch the adapter over without waiting for a click.
+
+Every one of these, including the destination folder, is **remembered between
+runs**. They're stored as JSON in `%APPDATA%\GoProUnloader\settings.json`
+(`~/.config/gopro-unloader/settings.json` elsewhere); delete that file to go
+back to defaults. A damaged or hand-edited file falls back to defaults rather
+than failing to start.
 
 **During a transfer** a progress bar tracks the whole run file by file, **Stop**
 cancels cleanly (partial files are removed), and the log pane at the bottom
@@ -285,6 +295,8 @@ Android/data/com.gopro.unloader/files/Movies/GoProUnloader/
 | `ffmpeg not found` | Install FFmpeg and ensure it is on your `PATH` (Python) |
 | GUI: `No module named 'tkinter'` | Re-run the python.org installer and tick **tcl/tk and IDLE** |
 | GUI: tiles say "no preview" | Run `python gopro_diag.py` — it reports which thumbnail source your camera actually serves. The log pane also names the failure per file. Downloads work regardless |
+| GUI: tiles say "install Pillow or FFmpeg" | The thumbnail downloaded fine but nothing can decode it. `pip install Pillow`, or put FFmpeg on `PATH` |
+| `pip install -r requirements.txt` ran but a package is still missing | `pip` and `python` may be different interpreters. Use `python -m pip install -r requirements.txt` |
 | GUI: **Play preview** does nothing | `ffplay` isn't on `PATH` — it's part of the full FFmpeg build, not the "essentials" one |
 | GUI: **Join automatically** fails | Windows-only, and some adapters refuse it; connect from the WiFi menu instead |
 | Download fails mid-way | Re-run the script/app; already-deleted files are gone but untouched files can be retried |
