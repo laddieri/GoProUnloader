@@ -27,7 +27,7 @@ and FFmpeg logic.
 | [`bleak`](https://github.com/hbldh/bleak) | Bluetooth LE communication |
 | [`requests`](https://docs.python-requests.org/) | HTTP downloads & GoPro API |
 | [`tqdm`](https://github.com/tqdm/tqdm) | Download & transcode progress bars (CLI) |
-| [`Pillow`](https://python-pillow.org/) | Thumbnail rendering (GUI) |
+| [`Pillow`](https://python-pillow.org/) | Thumbnail rendering (GUI) — optional; without it FFmpeg draws them instead, just slower |
 | [`ffmpeg`](https://ffmpeg.org/) | Video transcoding (must be on `PATH`) |
 | `ffplay` | Video preview in the GUI (ships with FFmpeg) |
 
@@ -285,6 +285,8 @@ Android/data/com.gopro.unloader/files/Movies/GoProUnloader/
 | `ffmpeg not found` | Install FFmpeg and ensure it is on your `PATH` (Python) |
 | GUI: `No module named 'tkinter'` | Re-run the python.org installer and tick **tcl/tk and IDLE** |
 | GUI: tiles say "no preview" | Run `python gopro_diag.py` — it reports which thumbnail source your camera actually serves. The log pane also names the failure per file. Downloads work regardless |
+| GUI: tiles say "install Pillow or FFmpeg" | The thumbnail downloaded fine but nothing can decode it. `pip install Pillow`, or put FFmpeg on `PATH` |
+| `pip install -r requirements.txt` ran but a package is still missing | `pip` and `python` may be different interpreters. Use `python -m pip install -r requirements.txt` |
 | GUI: **Play preview** does nothing | `ffplay` isn't on `PATH` — it's part of the full FFmpeg build, not the "essentials" one |
 | GUI: **Join automatically** fails | Windows-only, and some adapters refuse it; connect from the WiFi menu instead |
 | Download fails mid-way | Re-run the script/app; already-deleted files are gone but untouched files can be retried |
